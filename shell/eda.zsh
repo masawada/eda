@@ -9,7 +9,7 @@
 # Every other subcommand passes through untouched.
 
 eda() {
-  case "$1" in
+  case "${1-}" in
     switch|root)
       local dir
       dir="$(command eda "$@")" || return $?
@@ -46,4 +46,6 @@ _eda() {
   esac
 }
 
-compdef _eda eda
+if (( $+functions[compdef] )); then
+  compdef _eda eda
+fi

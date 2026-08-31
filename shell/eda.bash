@@ -9,7 +9,7 @@
 # Every other subcommand passes through untouched.
 
 eda() {
-  case "$1" in
+  case "${1-}" in
     switch|root)
       local dir
       dir="$(command eda "$@")" || return $?
@@ -23,18 +23,26 @@ eda() {
 
 _eda() {
   local cur=${COMP_WORDS[COMP_CWORD]}
+  COMPREPLY=()
   if [[ $COMP_CWORD -eq 1 ]]; then
     COMPREPLY=($(compgen -W "switch path list remove root status init" -- "$cur"))
     return
   fi
   case "${COMP_WORDS[1]}" in
     switch|path|remove)
-      local branches
-      branches=$({
-        git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
-        git for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null | sed 's|^origin/||'
-      } | grep -vx HEAD | sort -u)
-      COMPREPLY=($(compgen -W "$branches" -- "$cur"))
+      # Never feed ref names to compgen -W: it expands its word list, so a
+      # hostile ref name (fetched from a remote) could execute code. Append
+      # literally filtered candidates instead.
+      local ref
+      while IFS= read -r ref; do
+        [[ $ref == HEAD ]] && continue
+        [[ $ref == "$cur"* ]] && COMPREPLY+=("$ref")
+      done < <(
+        {
+          git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
+          git for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null | sed 's|^origin/||'
+        } | sort -u
+      )
       ;;
   esac
 }

@@ -18,13 +18,21 @@ func validateBranchName(dir, name string) error {
 	if strings.HasPrefix(name, "refs/") {
 		return fmt.Errorf("branch must be a short name, not a full ref: %q", name)
 	}
+	// "@" alone is git's alias for HEAD, not a usable branch name.
+	if name == "@" {
+		return fmt.Errorf("invalid branch name %q", name)
+	}
 	// A branch literally named "origin/x" is technically legal in git, but
 	// accepting it would make "eda switch origin/foo" ambiguous with the
 	// remote-tracking spelling, so refuse it outright.
 	if strings.HasPrefix(name, "origin/") {
 		return fmt.Errorf("branch must be a short name without a remote prefix: %q", name)
 	}
-	if _, err := runGit(dir, "check-ref-format", "--branch", name); err != nil {
+	// check-ref-format --branch expands the previous-checkout shorthand
+	// (e.g. "@{-1}") to a different name, which eda would then use verbatim
+	// as its ref and hash input. Validate against the literal ref form so
+	// only genuine short names pass.
+	if _, err := runGit(dir, "check-ref-format", "refs/heads/"+name); err != nil {
 		return fmt.Errorf("invalid branch name %q", name)
 	}
 	return nil

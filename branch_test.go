@@ -13,7 +13,7 @@ func TestValidateBranchName(t *testing.T) {
 			t.Errorf("validateBranchName(%q) = %v, want nil", name, err)
 		}
 	}
-	invalid := []string{"", "-flag", "refs/heads/foo", "origin/foo", "has space", "a..b", "trailing/"}
+	invalid := []string{"", "-flag", "refs/heads/foo", "origin/foo", "has space", "a..b", "trailing/", "@{-1}", "@"}
 	for _, name := range invalid {
 		if err := validateBranchName(repo, name); err == nil {
 			t.Errorf("validateBranchName(%q) = nil, want error", name)
