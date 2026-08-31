@@ -18,24 +18,24 @@ func TestParseWorktrees(t *testing.T) {
 		},
 		{
 			name: "primary checkout only",
-			in: "worktree /home/user/repo\n" +
-				"HEAD 8cf50be1111111111111111111111111111111aa\n" +
-				"branch refs/heads/main\n" +
-				"\n",
+			in: "worktree /home/user/repo\x00" +
+				"HEAD 8cf50be1111111111111111111111111111111aa\x00" +
+				"branch refs/heads/main\x00" +
+				"\x00",
 			want: []worktreeEntry{
 				{Path: "/home/user/repo", Head: "8cf50be1111111111111111111111111111111aa", Branch: "main"},
 			},
 		},
 		{
 			name: "linked worktree with slash branch",
-			in: "worktree /home/user/repo\n" +
-				"HEAD 8cf50be1111111111111111111111111111111aa\n" +
-				"branch refs/heads/main\n" +
-				"\n" +
-				"worktree /wt/abc123\n" +
-				"HEAD 9df50be2222222222222222222222222222222bb\n" +
-				"branch refs/heads/feature/foo\n" +
-				"\n",
+			in: "worktree /home/user/repo\x00" +
+				"HEAD 8cf50be1111111111111111111111111111111aa\x00" +
+				"branch refs/heads/main\x00" +
+				"\x00" +
+				"worktree /wt/abc123\x00" +
+				"HEAD 9df50be2222222222222222222222222222222bb\x00" +
+				"branch refs/heads/feature/foo\x00" +
+				"\x00",
 			want: []worktreeEntry{
 				{Path: "/home/user/repo", Head: "8cf50be1111111111111111111111111111111aa", Branch: "main"},
 				{Path: "/wt/abc123", Head: "9df50be2222222222222222222222222222222bb", Branch: "feature/foo"},
@@ -43,24 +43,24 @@ func TestParseWorktrees(t *testing.T) {
 		},
 		{
 			name: "detached, locked and prunable attributes",
-			in: "worktree /home/user/repo\n" +
-				"HEAD 8cf50be1111111111111111111111111111111aa\n" +
-				"branch refs/heads/main\n" +
-				"\n" +
-				"worktree /wt/detached\n" +
-				"HEAD 9df50be2222222222222222222222222222222bb\n" +
-				"detached\n" +
-				"\n" +
-				"worktree /wt/locked\n" +
-				"HEAD 9df50be3333333333333333333333333333333cc\n" +
-				"branch refs/heads/wip\n" +
-				"locked reason with spaces\n" +
-				"\n" +
-				"worktree /wt/prunable\n" +
-				"HEAD 9df50be4444444444444444444444444444444dd\n" +
-				"branch refs/heads/gone-dir\n" +
-				"prunable gitdir file points to non-existent location\n" +
-				"\n",
+			in: "worktree /home/user/repo\x00" +
+				"HEAD 8cf50be1111111111111111111111111111111aa\x00" +
+				"branch refs/heads/main\x00" +
+				"\x00" +
+				"worktree /wt/detached\x00" +
+				"HEAD 9df50be2222222222222222222222222222222bb\x00" +
+				"detached\x00" +
+				"\x00" +
+				"worktree /wt/locked\x00" +
+				"HEAD 9df50be3333333333333333333333333333333cc\x00" +
+				"branch refs/heads/wip\x00" +
+				"locked reason with spaces\x00" +
+				"\x00" +
+				"worktree /wt/prunable\x00" +
+				"HEAD 9df50be4444444444444444444444444444444dd\x00" +
+				"branch refs/heads/gone-dir\x00" +
+				"prunable gitdir file points to non-existent location\x00" +
+				"\x00",
 			want: []worktreeEntry{
 				{Path: "/home/user/repo", Head: "8cf50be1111111111111111111111111111111aa", Branch: "main"},
 				{Path: "/wt/detached", Head: "9df50be2222222222222222222222222222222bb", Detached: true},
@@ -70,18 +70,28 @@ func TestParseWorktrees(t *testing.T) {
 		},
 		{
 			name: "bare repository entry",
-			in: "worktree /home/user/repo.git\n" +
-				"bare\n" +
-				"\n",
+			in: "worktree /home/user/repo.git\x00" +
+				"bare\x00" +
+				"\x00",
 			want: []worktreeEntry{
 				{Path: "/home/user/repo.git", Bare: true},
 			},
 		},
 		{
+			name: "path containing a newline",
+			in: "worktree /wt/evil\npath\x00" +
+				"HEAD 8cf50be1111111111111111111111111111111aa\x00" +
+				"branch refs/heads/main\x00" +
+				"\x00",
+			want: []worktreeEntry{
+				{Path: "/wt/evil\npath", Head: "8cf50be1111111111111111111111111111111aa", Branch: "main"},
+			},
+		},
+		{
 			name: "missing trailing blank line",
-			in: "worktree /home/user/repo\n" +
-				"HEAD 8cf50be1111111111111111111111111111111aa\n" +
-				"branch refs/heads/main\n",
+			in: "worktree /home/user/repo\x00" +
+				"HEAD 8cf50be1111111111111111111111111111111aa\x00" +
+				"branch refs/heads/main\x00",
 			want: []worktreeEntry{
 				{Path: "/home/user/repo", Head: "8cf50be1111111111111111111111111111111aa", Branch: "main"},
 			},

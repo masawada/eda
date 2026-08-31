@@ -61,7 +61,7 @@ func runGit(dir string, args ...string) (string, error) {
 
 // loadRepo resolves the repository context for the given directory.
 func loadRepo(dir string) (*repoContext, error) {
-	out, err := runGit(dir, "worktree", "list", "--porcelain")
+	out, err := runGit(dir, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return nil, err
 	}

@@ -15,10 +15,12 @@ type worktreeEntry struct {
 	Prunable bool
 }
 
-// parseWorktrees parses `git worktree list --porcelain` output. Git is the
-// source of truth for the branch-to-worktree mapping, so this parser is the
-// only discovery mechanism eda has; it must tolerate attributes it does not
-// know about (future git versions may add some) by ignoring them.
+// parseWorktrees parses `git worktree list --porcelain -z` output. Git is
+// the source of truth for the branch-to-worktree mapping, so this parser is
+// the only discovery mechanism eda has; it must tolerate attributes it does
+// not know about (future git versions may add some) by ignoring them. The
+// NUL-terminated format is required because worktree paths may contain
+// newlines, which the line-oriented format would split into fake attributes.
 func parseWorktrees(out string) []worktreeEntry {
 	var entries []worktreeEntry
 	var cur *worktreeEntry
@@ -28,7 +30,7 @@ func parseWorktrees(out string) []worktreeEntry {
 			cur = nil
 		}
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(out, "\x00") {
 		if line == "" {
 			flush()
 			continue
