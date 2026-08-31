@@ -18,6 +18,7 @@ commands:
   remove [--force] <branch>  remove a worktree and its branch as a pair
   root                     print the primary checkout path
   status                   print current repository, worktree, and branch
+  init - zsh               print the zsh integration script (eval it in .zshrc)
   hook worktree-create     Claude Code WorktreeCreate hook entrypoint (stdin JSON)
   hook worktree-remove     Claude Code WorktreeRemove hook entrypoint (stdin JSON)
 `
@@ -54,6 +55,8 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) i
 		err = cmdRoot(stdout, rest, cwd)
 	case "status":
 		err = cmdStatus(stdout, rest, cwd)
+	case "init":
+		err = cmdInit(stdout, rest)
 	case "hook":
 		err = cmdHook(stdin, stdout, stderr, rest, cwd)
 	default:
