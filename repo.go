@@ -28,8 +28,16 @@ type repoContext struct {
 // expected failures (e.g. "ref missing", "config key unset") from
 // operational errors instead of failing open.
 func runGitExit(dir string, args ...string) (out string, code int, stderrMsg string, err error) {
+	return runGitExitInput(dir, "", args...)
+}
+
+// runGitExitInput is runGitExit with data fed to git's stdin.
+func runGitExitInput(dir, input string, args ...string) (out string, code int, stderrMsg string, err error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	if input != "" {
+		cmd.Stdin = strings.NewReader(input)
+	}
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	outBytes, err := cmd.Output()

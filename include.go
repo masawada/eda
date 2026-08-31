@@ -38,8 +38,33 @@ func copyWorktreeInclude(src, dst string) error {
 	for _, f := range ignored {
 		ignoredSet[f] = true
 	}
+	var candidates []string
 	for _, rel := range matched {
-		if !ignoredSet[rel] {
+		if ignoredSet[rel] {
+			candidates = append(candidates, rel)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Preflight against the destination: the checked-out branch may track a
+	// candidate path (never overwrite it) or no longer ignore it (copying
+	// would create an immediately dirty worktree).
+	tracked, err := lsFiles(dst)
+	if err != nil {
+		return err
+	}
+	trackedSet := make(map[string]bool, len(tracked))
+	for _, f := range tracked {
+		trackedSet[f] = true
+	}
+	dstIgnored, err := checkIgnore(dst, candidates)
+	if err != nil {
+		return err
+	}
+	for _, rel := range candidates {
+		if trackedSet[rel] || !dstIgnored[rel] {
 			continue
 		}
 		if err := copyFile(filepath.Join(src, rel), filepath.Join(dst, rel)); err != nil {
@@ -47,6 +72,27 @@ func copyWorktreeInclude(src, dst string) error {
 		}
 	}
 	return nil
+}
+
+// checkIgnore reports which of the given relative paths are gitignored in
+// dir, using one `git check-ignore` invocation.
+func checkIgnore(dir string, rels []string) (map[string]bool, error) {
+	input := strings.Join(rels, "\x00") + "\x00"
+	out, code, stderrMsg, err := runGitExitInput(dir, input, "check-ignore", "--stdin", "-z")
+	if err != nil {
+		return nil, err
+	}
+	// Exit 1 means no path is ignored; anything above is an error.
+	if code > 1 {
+		return nil, fmt.Errorf("git check-ignore: exit status %d: %s", code, stderrMsg)
+	}
+	result := make(map[string]bool, len(rels))
+	for _, f := range strings.Split(out, "\x00") {
+		if f != "" {
+			result[f] = true
+		}
+	}
+	return result, nil
 }
 
 // lsFiles runs `git ls-files -z` with the given options and returns the
@@ -82,8 +128,13 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, info.Mode().Perm())
+	// Exclusive creation: even after the preflight, never clobber a file
+	// (or follow a symlink) that appeared at the destination.
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, info.Mode().Perm())
 	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {

@@ -65,6 +65,69 @@ func TestCopyWorktreeIncludeWithoutFile(t *testing.T) {
 	}
 }
 
+// makeDivergentBranch creates a branch whose tree is edited by mutate,
+// using a throwaway worktree that is removed afterwards.
+func makeDivergentBranch(t *testing.T, repo, branch string, mutate func(dir string)) {
+	t.Helper()
+	tmp := filepath.Join(t.TempDir(), "edit")
+	gitT(t, repo, "worktree", "add", "-q", "-b", branch, tmp)
+	mutate(tmp)
+	gitT(t, tmp, "add", "-A", "-f")
+	gitT(t, tmp, "commit", "-q", "-m", "diverge")
+	gitT(t, repo, "worktree", "remove", "--force", tmp)
+}
+
+func TestCopyWorktreeIncludeNeverOverwritesTrackedFile(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// The destination branch tracks .env (and stops ignoring it): the
+	// checkout puts the tracked content in place, and the include copy at
+	// creation time must not clobber it.
+	makeDivergentBranch(t, repo, "tracked-env", func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("secrets/\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TRACKED=1\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "tracked-env")
+
+	body, err := os.ReadFile(filepath.Join(wt, ".env"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "TRACKED=1\n" {
+		t.Errorf("tracked .env was overwritten: %q", body)
+	}
+	if clean, _ := worktreeClean(wt); !clean {
+		t.Error("destination worktree must stay clean after the copy")
+	}
+}
+
+func TestCopyWorktreeIncludeSkipsWhenDestinationDoesNotIgnore(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// The destination branch stops ignoring .env: copying it would create
+	// an immediately dirty worktree.
+	makeDivergentBranch(t, repo, "no-ignore", func(dir string) {
+		if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("secrets/\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "no-ignore")
+
+	if _, err := os.Stat(filepath.Join(wt, ".env")); !os.IsNotExist(err) {
+		t.Error(".env must not be copied when the destination does not ignore it")
+	}
+	if _, err := os.Stat(filepath.Join(wt, "secrets", "key.txt")); err != nil {
+		t.Errorf("still-ignored file must be copied: %v", err)
+	}
+	if clean, _ := worktreeClean(wt); !clean {
+		t.Error("destination worktree must stay clean after the copy")
+	}
+}
+
 func TestResolveWorktreeCopiesIncludes(t *testing.T) {
 	repo := setupIncludeRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
