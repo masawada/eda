@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -125,6 +126,38 @@ func TestResolveWorktreeCreatesFromCwdHead(t *testing.T) {
 	}
 	if want := canonicalDir(root, repo, "feature-b"); wtB != want {
 		t.Errorf("worktree path = %q, want canonical %q", wtB, want)
+	}
+}
+
+func TestResolveWorktreeRejectsPrunableEntry(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	ctx.Entries = append(ctx.Entries, worktreeEntry{
+		Path: "/nonexistent/stale", Branch: "topic", Prunable: true,
+	})
+	if _, err := resolveWorktree(ctx, repo, "topic"); err == nil {
+		t.Error("a prunable registration must not be returned as a usable worktree")
+	}
+}
+
+func TestResolveWorktreeRollsBackOnCopyFailure(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	ctx, root := loadRepoWithRoot(t, repo)
+	if err := os.Chmod(filepath.Join(repo, ".worktreeinclude"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(repo, ".worktreeinclude"), 0o644) })
+
+	_, err := resolveWorktree(ctx, repo, "feature-x")
+	if err == nil {
+		t.Fatal("copy failure must surface as an error")
+	}
+	dir := canonicalDir(root, repo, "feature-x")
+	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
+		t.Errorf("worktree %s must be rolled back", dir)
+	}
+	if ok, _ := localBranchExists(repo, "feature-x"); ok {
+		t.Error("created branch must be rolled back")
 	}
 }
 

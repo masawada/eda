@@ -43,13 +43,21 @@ func remoteBranchExists(dir, branch string) (bool, error) {
 }
 
 func refExists(dir, ref string) (bool, error) {
-	_, err := runGit(dir, "show-ref", "--verify", "--quiet", ref)
-	if err == nil {
-		return true, nil
+	_, code, stderrMsg, err := runGitExit(dir, "show-ref", "--verify", "--quiet", ref)
+	if err != nil {
+		return false, err
 	}
-	// show-ref --quiet exits 1 when the ref is missing; treat every failure
-	// as absence since the repository itself was already validated.
-	return false, nil
+	switch code {
+	case 0:
+		return true, nil
+	case 1:
+		// show-ref --verify --quiet exits 1 for a missing ref.
+		return false, nil
+	default:
+		// Anything else (corrupt refs, permissions, ...) must not be read
+		// as absence: the gone-upstream deletion path would fail open.
+		return false, fmt.Errorf("git show-ref %s: exit status %d: %s", ref, code, stderrMsg)
+	}
 }
 
 // headCommit resolves HEAD to a commit sha. It fails on an unborn HEAD

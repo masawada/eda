@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -21,22 +22,41 @@ type repoContext struct {
 	Entries []worktreeEntry
 }
 
-// runGit runs git with the given working directory and returns its stdout.
-// On failure the error carries git's stderr so callers can surface it.
-func runGit(dir string, args ...string) (string, error) {
+// runGitExit runs git with the given working directory and returns its
+// stdout and exit code. err is non-nil only when git could not run at all;
+// a nonzero exit is reported through code so callers can distinguish
+// expected failures (e.g. "ref missing", "config key unset") from
+// operational errors instead of failing open.
+func runGitExit(dir string, args ...string) (out string, code int, stderrMsg string, err error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	outBytes, err := cmd.Output()
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return string(outBytes), exitErr.ExitCode(), strings.TrimSpace(stderr.String()), nil
 		}
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), msg)
+		return "", -1, "", fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
 	}
-	return string(out), nil
+	return string(outBytes), 0, "", nil
+}
+
+// runGit runs git and returns its stdout, turning any failure into an error
+// that carries git's stderr.
+func runGit(dir string, args ...string) (string, error) {
+	out, code, stderrMsg, err := runGitExit(dir, args...)
+	if err != nil {
+		return "", err
+	}
+	if code != 0 {
+		if stderrMsg == "" {
+			stderrMsg = fmt.Sprintf("exit status %d", code)
+		}
+		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), stderrMsg)
+	}
+	return out, nil
 }
 
 // loadRepo resolves the repository context for the given directory.
@@ -61,30 +81,51 @@ func loadRepo(dir string) (*repoContext, error) {
 }
 
 // worktreeRoot reads eda.worktreeRoot from git config (--type=path expands
-// "~"), falling back to ~/.local/share/worktrees. The value must be an
-// absolute path: a relative root would resolve differently depending on the
-// invocation directory, breaking the canonical placement policy. The root is
-// created and resolved to a realpath so the paths eda computes compare
-// equal to the realpaths git records in its worktree list.
+// "~"), falling back to ~/.local/share/worktrees only when the key is unset
+// (exit 1); any other config failure is an error, not a silent fallback.
+// The value must be an absolute path: a relative root would resolve
+// differently depending on the invocation directory, breaking the canonical
+// placement policy. An existing root is resolved to a realpath so the paths
+// eda computes compare equal to the realpaths git records; a missing root is
+// returned as-is and created lazily by worktree creation, so read-only
+// commands never provision storage.
 func worktreeRoot(dir string) (string, error) {
 	var root string
-	out, err := runGit(dir, "config", "--type=path", "--get", "eda.worktreeroot")
-	if err != nil {
+	out, code, stderrMsg, err := runGitExit(dir, "config", "--type=path", "--get", "eda.worktreeroot")
+	switch {
+	case err != nil:
+		return "", err
+	case code == 0:
+		root = strings.TrimSuffix(out, "\n")
+		if !filepath.IsAbs(root) {
+			return "", fmt.Errorf("eda.worktreeRoot must be an absolute path, got %q", root)
+		}
+	case code == 1:
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)
 		}
 		root = filepath.Join(home, ".local", "share", "worktrees")
-	} else {
-		root = strings.TrimSpace(out)
-		if !filepath.IsAbs(root) {
-			return "", fmt.Errorf("eda.worktreeRoot must be an absolute path, got %q", root)
-		}
-	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		return "", fmt.Errorf("create worktree root: %w", err)
+	default:
+		return "", fmt.Errorf("read eda.worktreeRoot: exit status %d: %s", code, stderrMsg)
 	}
 	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return root, nil
+		}
+		return "", fmt.Errorf("resolve worktree root: %w", err)
+	}
+	return resolved, nil
+}
+
+// ensureWorktreeRoot creates the worktree root if needed and returns its
+// realpath. Only worktree creation calls this.
+func ensureWorktreeRoot(ctx *repoContext) (string, error) {
+	if err := os.MkdirAll(ctx.WorktreeRoot, 0o755); err != nil {
+		return "", fmt.Errorf("create worktree root: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(ctx.WorktreeRoot)
 	if err != nil {
 		return "", fmt.Errorf("resolve worktree root: %w", err)
 	}

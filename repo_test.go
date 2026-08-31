@@ -75,12 +75,13 @@ func TestWorktreeRootDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.EvalSymlinks(filepath.Join(home, ".local", "share", "worktrees"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	want := filepath.Join(home, ".local", "share", "worktrees")
 	if ctx.WorktreeRoot != want {
 		t.Errorf("WorktreeRoot = %q, want default %q", ctx.WorktreeRoot, want)
+	}
+	// Loading the repository must not provision the root; only creation does.
+	if _, err := os.Stat(want); !os.IsNotExist(err) {
+		t.Errorf("worktree root must not be created by loadRepo")
 	}
 }
 
@@ -92,12 +93,8 @@ func TestWorktreeRootFromConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.EvalSymlinks(custom)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if ctx.WorktreeRoot != want {
-		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, want)
+	if ctx.WorktreeRoot != custom {
+		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, custom)
 	}
 }
 
@@ -110,10 +107,7 @@ func TestWorktreeRootTildeExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := filepath.EvalSymlinks(filepath.Join(home, "wt"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	want := filepath.Join(home, "wt")
 	if ctx.WorktreeRoot != want {
 		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, want)
 	}
