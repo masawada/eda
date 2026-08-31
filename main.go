@@ -18,7 +18,7 @@ commands:
   remove [--force] <branch>  remove a worktree and its branch as a pair
   root                     print the primary checkout path
   status                   print current repository, worktree, and branch
-  init - zsh               print the zsh integration script (eval it in .zshrc)
+  init - <shell>           print the shell integration script (zsh, bash)
   hook worktree-create     Claude Code WorktreeCreate hook entrypoint (stdin JSON)
   hook worktree-remove     Claude Code WorktreeRemove hook entrypoint (stdin JSON)
 `

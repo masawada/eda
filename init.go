@@ -6,12 +6,15 @@ import (
 	"io"
 )
 
-// zshScript is emitted by `eda init - zsh` for eval in .zshrc, rbenv style.
-// It lives in a separate file for shell syntax highlighting and is embedded
-// so the binary is self-contained.
+// The integration scripts are emitted by `eda init - <shell>` for eval in
+// the shell's rc file, rbenv style. They live in separate files for shell
+// syntax highlighting and are embedded so the binary is self-contained.
 //
 //go:embed shell/eda.zsh
 var zshScript string
+
+//go:embed shell/eda.bash
+var bashScript string
 
 func cmdInit(stdout io.Writer, args []string) error {
 	// Accept the rbenv-style `init - <shell>` as well as `init <shell>`.
@@ -21,9 +24,13 @@ func cmdInit(stdout io.Writer, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: eda init - <shell>")
 	}
-	if args[0] != "zsh" {
-		return fmt.Errorf("unsupported shell %q (only zsh is supported)", args[0])
+	switch args[0] {
+	case "zsh":
+		fmt.Fprint(stdout, zshScript)
+	case "bash":
+		fmt.Fprint(stdout, bashScript)
+	default:
+		return fmt.Errorf("unsupported shell %q (zsh and bash are supported)", args[0])
 	}
-	fmt.Fprint(stdout, zshScript)
 	return nil
 }
