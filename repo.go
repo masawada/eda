@@ -63,19 +63,30 @@ func loadRepo(dir string) (*repoContext, error) {
 // worktreeRoot reads eda.worktreeRoot from git config (--type=path expands
 // "~"), falling back to ~/.local/share/worktrees. The value must be an
 // absolute path: a relative root would resolve differently depending on the
-// invocation directory, breaking the canonical placement policy.
+// invocation directory, breaking the canonical placement policy. The root is
+// created and resolved to a realpath so the paths eda computes compare
+// equal to the realpaths git records in its worktree list.
 func worktreeRoot(dir string) (string, error) {
+	var root string
 	out, err := runGit(dir, "config", "--type=path", "--get", "eda.worktreeroot")
 	if err != nil {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("resolve home directory: %w", err)
 		}
-		return filepath.Join(home, ".local", "share", "worktrees"), nil
+		root = filepath.Join(home, ".local", "share", "worktrees")
+	} else {
+		root = strings.TrimSpace(out)
+		if !filepath.IsAbs(root) {
+			return "", fmt.Errorf("eda.worktreeRoot must be an absolute path, got %q", root)
+		}
 	}
-	root := strings.TrimSpace(out)
-	if !filepath.IsAbs(root) {
-		return "", fmt.Errorf("eda.worktreeRoot must be an absolute path, got %q", root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return "", fmt.Errorf("create worktree root: %w", err)
 	}
-	return root, nil
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve worktree root: %w", err)
+	}
+	return resolved, nil
 }

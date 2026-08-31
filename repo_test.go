@@ -75,7 +75,10 @@ func TestWorktreeRootDefault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, ".local", "share", "worktrees")
+	want, err := filepath.EvalSymlinks(filepath.Join(home, ".local", "share", "worktrees"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ctx.WorktreeRoot != want {
 		t.Errorf("WorktreeRoot = %q, want default %q", ctx.WorktreeRoot, want)
 	}
@@ -83,13 +86,18 @@ func TestWorktreeRootDefault(t *testing.T) {
 
 func TestWorktreeRootFromConfig(t *testing.T) {
 	repo := newTestRepo(t)
-	gitT(t, repo, "config", "eda.worktreeRoot", "/custom/worktrees")
+	custom := filepath.Join(t.TempDir(), "custom", "worktrees")
+	gitT(t, repo, "config", "eda.worktreeRoot", custom)
 	ctx, err := loadRepo(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ctx.WorktreeRoot != "/custom/worktrees" {
-		t.Errorf("WorktreeRoot = %q, want /custom/worktrees", ctx.WorktreeRoot)
+	want, err := filepath.EvalSymlinks(custom)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.WorktreeRoot != want {
+		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, want)
 	}
 }
 
@@ -102,9 +110,31 @@ func TestWorktreeRootTildeExpansion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(home, "wt")
+	want, err := filepath.EvalSymlinks(filepath.Join(home, "wt"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ctx.WorktreeRoot != want {
 		t.Errorf("WorktreeRoot = %q, want %q", ctx.WorktreeRoot, want)
+	}
+}
+
+func TestWorktreeRootResolvesSymlinks(t *testing.T) {
+	repo := newTestRepo(t)
+	// t.TempDir may contain symlinked components (e.g. /var -> /private/var
+	// on macOS); the resolved root must match what git records.
+	raw := t.TempDir()
+	gitT(t, repo, "config", "eda.worktreeRoot", raw)
+	ctx, err := loadRepo(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.WorktreeRoot != want {
+		t.Errorf("WorktreeRoot = %q, want realpath %q", ctx.WorktreeRoot, want)
 	}
 }
 
