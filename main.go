@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -77,6 +78,16 @@ func singleBranchArg(cmd string, args []string) (string, error) {
 	return args[0], nil
 }
 
+// printPath writes the single path line that shell integration and the
+// hooks consume. A write failure must fail the command: reporting success
+// with a missing or partial path would break the stdout contract.
+func printPath(w io.Writer, path string) error {
+	if _, err := fmt.Fprintln(w, path); err != nil {
+		return fmt.Errorf("write path: %w", err)
+	}
+	return nil
+}
+
 func cmdSwitch(stdout io.Writer, args []string, cwd string) error {
 	branch, err := singleBranchArg("switch", args)
 	if err != nil {
@@ -90,8 +101,7 @@ func cmdSwitch(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, dir)
-	return nil
+	return printPath(stdout, dir)
 }
 
 func cmdPath(stdout io.Writer, args []string, cwd string) error {
@@ -105,8 +115,10 @@ func cmdPath(stdout io.Writer, args []string, cwd string) error {
 	}
 	for _, e := range ctx.Entries {
 		if !e.Bare && !e.Detached && e.Branch == branch {
-			fmt.Fprintln(stdout, e.Path)
-			return nil
+			if e.Prunable {
+				return fmt.Errorf("worktree registration for %q at %s is stale; run `git worktree prune`", branch, e.Path)
+			}
+			return printPath(stdout, e.Path)
 		}
 	}
 	return fmt.Errorf("no worktree for branch %q", branch)
@@ -125,6 +137,8 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 		var notes []string
 		if i == 0 {
 			notes = append(notes, "primary")
+		} else if !managedWorktree(ctx, e.Path) {
+			notes = append(notes, "external")
 		}
 		if e.Bare {
 			name = "(bare)"
@@ -173,8 +187,7 @@ func cmdRoot(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(stdout, ctx.PrimaryPath)
-	return nil
+	return printPath(stdout, ctx.PrimaryPath)
 }
 
 func cmdStatus(stdout io.Writer, args []string, cwd string) error {
@@ -201,10 +214,14 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
 // is the session's current directory; it decides the base of new branches so
-// a subagent spawned inside a worktree stacks on that worktree.
+// a subagent spawned inside a worktree stacks on that worktree. The path
+// field is speculative for WorktreeRemove, whose real schema could not be
+// observed in the step0 spike (the hook never fired for hook-created
+// worktrees).
 type hookInput struct {
 	Name string `json:"name"`
 	Cwd  string `json:"cwd"`
+	Path string `json:"path"`
 }
 
 func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) error {
@@ -219,9 +236,6 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 	if err := json.Unmarshal(body, &in); err != nil {
 		return fmt.Errorf("decode hook input: %w", err)
 	}
-	if in.Name == "" {
-		return fmt.Errorf("hook input has no worktree name")
-	}
 	// Fall back to the hook process working directory when cwd is absent;
 	// both were observed to be the session directory in the step0 spike.
 	dir := in.Cwd
@@ -231,6 +245,9 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 
 	switch args[0] {
 	case "worktree-create":
+		if in.Name == "" {
+			return fmt.Errorf("hook input has no worktree name")
+		}
 		ctx, err := loadRepo(dir)
 		if err != nil {
 			return err
@@ -239,17 +256,33 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		if err != nil {
 			return err
 		}
-		fmt.Fprintln(stdout, wt)
-		return nil
+		return printPath(stdout, wt)
 	case "worktree-remove":
 		ctx, err := loadRepo(dir)
 		if err != nil {
 			return err
 		}
-		if err := removeWorktree(ctx, in.Name, false); err != nil {
-			// Keeping a worktree that still holds work is a valid outcome
-			// for the hook, not a failure.
-			fmt.Fprintf(stderr, "eda: worktree kept: %v\n", err)
+		branch := in.Name
+		if branch == "" && in.Path != "" {
+			for _, e := range ctx.Entries {
+				if e.Path == in.Path {
+					branch = e.Branch
+					break
+				}
+			}
+		}
+		if branch == "" {
+			return fmt.Errorf("hook input identifies no worktree (name and path are empty or unknown)")
+		}
+		if err := removeWorktree(ctx, branch, false); err != nil {
+			var refusal refusalError
+			if errors.As(err, &refusal) {
+				// Keeping a worktree that still holds work is a valid
+				// outcome for the hook, not a failure.
+				fmt.Fprintf(stderr, "eda: worktree kept: %v\n", err)
+				return nil
+			}
+			return err
 		}
 		return nil
 	default:

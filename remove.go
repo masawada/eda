@@ -2,8 +2,29 @@ package main
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
+
+// refusalError marks a removal that the safety policy declined: nothing was
+// deleted and keeping the worktree is a legitimate outcome. Operational
+// failures (git errors, partial deletion) use ordinary errors instead, so
+// the WorktreeRemove hook can report success for the former and fail for
+// the latter.
+type refusalError struct{ msg string }
+
+func (e refusalError) Error() string { return e.msg }
+
+func refusalf(format string, a ...any) error {
+	return refusalError{msg: fmt.Sprintf(format, a...)}
+}
+
+// managedWorktree reports whether the path lives under eda's worktree
+// root. eda only deletes worktrees it placed; anything else belongs to
+// `git worktree remove`.
+func managedWorktree(ctx *repoContext, path string) bool {
+	return strings.HasPrefix(path, ctx.WorktreeRoot+string(filepath.Separator))
+}
 
 // removeWorktree deletes a worktree and its branch as a pair. Unless force
 // is set, it refuses to touch anything when the worktree is dirty or the
@@ -18,7 +39,7 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 		return err
 	}
 	if len(ctx.Entries) > 0 && ctx.Entries[0].Branch == branch {
-		return fmt.Errorf("branch %q is checked out in the primary checkout; eda does not remove it", branch)
+		return refusalf("branch %q is checked out in the primary checkout; eda does not remove it", branch)
 	}
 	var entry *worktreeEntry
 	for i, e := range ctx.Entries[1:] {
@@ -28,10 +49,16 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 		}
 	}
 	if entry == nil {
-		return fmt.Errorf("no worktree found for branch %q", branch)
+		return refusalf("no worktree found for branch %q", branch)
 	}
 	if entry.Locked {
-		return fmt.Errorf("worktree %s is locked; unlock it with `git worktree unlock` first", entry.Path)
+		return refusalf("worktree %s is locked; unlock it with `git worktree unlock` first", entry.Path)
+	}
+	if entry.Prunable {
+		return refusalf("worktree registration for %q at %s is stale; run `git worktree prune`", branch, entry.Path)
+	}
+	if !managedWorktree(ctx, entry.Path) {
+		return refusalf("worktree %s is outside the eda worktree root; remove it with `git worktree remove`", entry.Path)
 	}
 
 	if !force {
@@ -40,14 +67,14 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 			return err
 		}
 		if !clean {
-			return fmt.Errorf("worktree %s has uncommitted changes; commit them or use --force", entry.Path)
+			return refusalf("worktree %s has uncommitted changes; commit them or use --force", entry.Path)
 		}
 		safe, reason, err := branchSafeToDelete(ctx.PrimaryPath, branch)
 		if err != nil {
 			return err
 		}
 		if !safe {
-			return fmt.Errorf("branch %q %s; push and merge it, or use --force", branch, reason)
+			return refusalf("branch %q %s; push and merge it, or use --force", branch, reason)
 		}
 	}
 
@@ -69,13 +96,15 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 
 // worktreeClean reports whether the worktree has no changed or untracked
 // files. Ignored files are not considered: files carried over by
-// .worktreeinclude are disposable by design.
+// .worktreeinclude are disposable by design. The explicit options override
+// repository configuration (status.showUntrackedFiles, submodule ignore
+// rules) that could otherwise hide dirt from this safety check.
 func worktreeClean(dir string) (bool, error) {
-	out, err := runGit(dir, "status", "--porcelain")
+	out, err := runGit(dir, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none")
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(out) == "", nil
+	return strings.Trim(out, "\x00") == "", nil
 }
 
 // branchSafeToDelete reports whether deleting the branch loses no commits,

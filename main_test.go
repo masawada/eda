@@ -196,6 +196,33 @@ func jsonString(s string) string {
 	return `"` + strings.ReplaceAll(s, `"`, `\"`) + `"`
 }
 
+type failWriter struct{}
+
+func (failWriter) Write([]byte) (int, error) {
+	return 0, os.ErrClosed
+}
+
+func TestRunRootFailsOnBrokenStdout(t *testing.T) {
+	repo := newTestRepo(t)
+	loadRepoWithRoot(t, repo)
+	var stderr strings.Builder
+	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"root"}, repo); code == 0 {
+		t.Error("a failed path write must fail the command, not report success")
+	}
+}
+
+func TestRunListMarksExternalWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	wt := filepath.Join(t.TempDir(), "manual-wt")
+	gitT(t, repo, "worktree", "add", "-q", "-b", "topic", wt)
+	loadRepoWithRoot(t, repo)
+
+	_, stdout, _ := runEda(t, repo, "", "list")
+	if !strings.Contains(stdout, "external") {
+		t.Errorf("a worktree outside the root must be marked external, got %q", stdout)
+	}
+}
+
 func TestMainBinaryDir(t *testing.T) {
 	// run() receives the process working directory from main(); make sure
 	// helpers that rely on it resolve relative to that directory.

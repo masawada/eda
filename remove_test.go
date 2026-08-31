@@ -169,6 +169,60 @@ func TestRemoveWorktreeRefusesPrimary(t *testing.T) {
 	}
 }
 
+func TestRemoveWorktreeRefusesUnmanagedWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	wt := filepath.Join(t.TempDir(), "manual-wt")
+	gitT(t, repo, "worktree", "add", "-q", "-b", "topic", wt)
+	loadRepoWithRoot(t, repo)
+
+	// A manual worktree outside the worktree root is not eda's to delete,
+	// with or without --force.
+	if err := removeWorktree(reload(t, repo), "topic", false); err == nil {
+		t.Fatal("unmanaged worktree must be refused")
+	}
+	if err := removeWorktree(reload(t, repo), "topic", true); err == nil {
+		t.Fatal("unmanaged worktree must be refused even with force")
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("unmanaged worktree must be kept: %v", err)
+	}
+}
+
+func TestRemoveWorktreeRefusesPrunable(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// Deleting the directory behind git's back leaves a prunable
+	// registration; eda must point at `git worktree prune` instead of
+	// deleting the branch.
+	if err := os.RemoveAll(wt); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeWorktree(reload(t, repo), "topic", false); err == nil {
+		t.Fatal("prunable registration must be refused")
+	}
+	if ok, _ := localBranchExists(repo, "topic"); !ok {
+		t.Error("branch must be kept for a prunable registration")
+	}
+}
+
+func TestRemoveWorktreeCleanCheckIgnoresStatusConfig(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	if err := os.WriteFile(filepath.Join(wt, "untracked.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// status.showUntrackedFiles=no would hide the file from a bare
+	// `git status --porcelain`; the safety check must not be fooled.
+	gitT(t, repo, "config", "status.showUntrackedFiles", "no")
+
+	if err := removeWorktree(reload(t, repo), "topic", false); err == nil {
+		t.Fatal("dirty worktree must be refused regardless of status config")
+	}
+	assertKept(t, repo, wt, "topic")
+}
+
 func TestRemoveWorktreeUnknownBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	loadRepoWithRoot(t, repo)
