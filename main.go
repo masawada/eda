@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 )
 
 const usage = `usage: eda <command> [arguments]
@@ -132,6 +133,7 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	for i, e := range ctx.Entries {
 		name := e.Branch
 		var notes []string
@@ -152,15 +154,16 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 		if e.Prunable {
 			notes = append(notes, "prunable")
 		}
-		line := fmt.Sprintf("%s\t%s", name, e.Path)
+		// Notes stick to the name: long paths would push a trailing notes
+		// column out of sight.
 		if len(notes) > 0 {
-			line += "\t[" + strings.Join(notes, ",") + "]"
+			name += "[" + strings.Join(notes, ",") + "]"
 		}
-		if _, err := fmt.Fprintln(stdout, line); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\n", name, e.Path); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tw.Flush()
 }
 
 // cmdRemove removes each branch independently (best effort): a refused or
