@@ -25,7 +25,6 @@ $ eda switch <branch>   # resolve or create the worktree and move there
 $ eda list              # list worktrees of the current repository
 $ eda remove <branch>...  # remove worktrees and their branches as pairs
 $ eda root              # move back to the primary checkout
-$ eda path <branch>     # print the worktree path (never creates)
 $ eda status            # print current repository, worktree, and branch
 ```
 

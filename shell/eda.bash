@@ -25,11 +25,11 @@ _eda() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   COMPREPLY=()
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "switch path list remove root status init" -- "$cur"))
+    COMPREPLY=($(compgen -W "switch list remove root status init" -- "$cur"))
     return
   fi
   case "${COMP_WORDS[1]}" in
-    switch|path|remove)
+    switch|remove)
       # Never feed ref names to compgen -W: it expands its word list, so a
       # hostile ref name (fetched from a remote) could execute code. Append
       # literally filtered candidates instead.

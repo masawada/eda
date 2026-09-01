@@ -25,7 +25,6 @@ _eda() {
   local -a cmds
   cmds=(
     'switch:resolve or create the worktree for a branch and move there'
-    'path:print the worktree path for a branch'
     'list:list worktrees of the current repository'
     'remove:remove worktrees and their branches as pairs'
     'root:move to the primary checkout'
@@ -36,7 +35,7 @@ _eda() {
     return
   fi
   case "$words[2]" in
-    switch|path|remove)
+    switch|remove)
       local -aU branches
       branches=(${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)"})
       branches+=(${${(f)"$(git for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null)"}#origin/})
