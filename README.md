@@ -104,3 +104,7 @@ when nothing would be lost, and keeps it (reporting on stderr) otherwise.
 $ make test
 $ make build
 ```
+
+## License
+
+`eda` is licensed under the [MIT License](LICENSE).
