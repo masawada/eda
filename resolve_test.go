@@ -23,8 +23,24 @@ func loadRepoWithRoot(t *testing.T, repo string) (*repoContext, string) {
 	return ctx, root
 }
 
-func canonicalDir(root, primary, branch string) string {
-	return filepath.Join(root, strings.TrimPrefix(primary, "/"), branchHash(branch)[:8])
+// assertWorktreeDir checks that dir sits directly under the repo's worktree
+// base with a random-style leaf name. The exact name is unpredictable by
+// design, so tests only pin down where the worktree lives and what the name
+// looks like.
+func assertWorktreeDir(t *testing.T, root, primary, dir string) {
+	t.Helper()
+	if base := worktreeBase(root, primary); filepath.Dir(dir) != base {
+		t.Errorf("worktree %q must live directly under %q", dir, base)
+	}
+	leaf := filepath.Base(dir)
+	if len(leaf) != 8 {
+		t.Errorf("worktree directory name %q must be 8 characters", leaf)
+	}
+	for _, c := range leaf {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			t.Errorf("worktree directory name %q must be lowercase hex", leaf)
+		}
+	}
 }
 
 func TestResolveWorktreeExisting(t *testing.T) {
@@ -55,10 +71,7 @@ func TestResolveWorktreeFromLocalBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := canonicalDir(root, repo, "topic")
-	if got != want {
-		t.Errorf("worktree path = %q, want canonical %q", got, want)
-	}
+	assertWorktreeDir(t, root, repo, got)
 	if out := gitT(t, got, "rev-parse", "--abbrev-ref", "HEAD"); strings.TrimSpace(out) != "topic" {
 		t.Errorf("worktree HEAD = %q, want topic", strings.TrimSpace(out))
 	}
@@ -79,10 +92,7 @@ func TestResolveWorktreeFromRemoteBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := canonicalDir(root, repo, "remote-only")
-	if got != want {
-		t.Errorf("worktree path = %q, want canonical %q", got, want)
-	}
+	assertWorktreeDir(t, root, repo, got)
 	up := strings.TrimSpace(gitT(t, got, "rev-parse", "--abbrev-ref", "remote-only@{upstream}"))
 	if up != "origin/remote-only" {
 		t.Errorf("upstream = %q, want origin/remote-only", up)
@@ -124,9 +134,7 @@ func TestResolveWorktreeCreatesFromCwdHead(t *testing.T) {
 	if sha, _ := headCommit(wtB); sha != aSha {
 		t.Errorf("feature-b base = %s, want feature-a HEAD %s (stacked)", sha, aSha)
 	}
-	if want := canonicalDir(root, repo, "feature-b"); wtB != want {
-		t.Errorf("worktree path = %q, want canonical %q", wtB, want)
-	}
+	assertWorktreeDir(t, root, repo, wtB)
 }
 
 func TestResolveWorktreeRejectsPrunableEntry(t *testing.T) {
@@ -152,9 +160,10 @@ func TestResolveWorktreeRollsBackOnCopyFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("copy failure must surface as an error")
 	}
-	dir := canonicalDir(root, repo, "feature-x")
-	if _, statErr := os.Stat(dir); !os.IsNotExist(statErr) {
-		t.Errorf("worktree %s must be rolled back", dir)
+	// The directory name is random, so check that nothing is left under the
+	// repo's worktree base instead of probing a known path.
+	if left, err := os.ReadDir(worktreeBase(root, repo)); err == nil && len(left) > 0 {
+		t.Errorf("worktree base must be empty after rollback, found %v", left)
 	}
 	if ok, _ := localBranchExists(repo, "feature-x"); ok {
 		t.Error("created branch must be rolled back")

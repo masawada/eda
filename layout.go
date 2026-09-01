@@ -1,48 +1,62 @@
 package main
 
 import (
-	"crypto/sha256"
+	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
 
-// branchHash returns the full lowercase sha256 hex of the branch short name.
-// The directory name for a worktree is a truncated prefix of this hash; the
-// mapping back to the branch always goes through git (porcelain), never
-// through the directory name.
-func branchHash(branch string) string {
-	sum := sha256.Sum256([]byte(branch))
-	return hex.EncodeToString(sum[:])
-}
+// maxNameAttempts bounds the redraws in chooseWorktreeDir. Collisions on a
+// 32-bit name are practically nonexistent, so exhausting the attempts means
+// the environment is broken and is reported as an error.
+const maxNameAttempts = 4
 
-// worktreeDirCandidates returns the canonical directory candidates for a
-// branch, from the shortest hash prefix to the full hash. Longer prefixes are
-// used only when a shorter one is already taken by another branch.
-func worktreeDirCandidates(root, primaryPath, branch string) []string {
-	h := branchHash(branch)
-	base := filepath.Join(root, strings.TrimPrefix(primaryPath, string(filepath.Separator)))
-	var candidates []string
-	for _, n := range []int{8, 16, 32, 64} {
-		candidates = append(candidates, filepath.Join(base, h[:n]))
+// randomDirName returns a random 8-character lowercase hex string. It is a
+// variable so tests can substitute a deterministic sequence.
+var randomDirName = func() (string, error) {
+	var b [4]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("generate worktree directory name: %w", err)
 	}
-	return candidates
+	return hex.EncodeToString(b[:]), nil
 }
 
-// chooseWorktreeDir picks the first candidate that is either unused or
-// already the worktree of the requested branch. Candidates registered to a
-// different branch (a truncated-hash collision) are skipped.
-func chooseWorktreeDir(candidates []string, branch string, entries []worktreeEntry) (string, error) {
-	byPath := make(map[string]worktreeEntry, len(entries))
+// worktreeBase returns the directory that holds all worktrees of the repo
+// identified by its primary checkout path.
+func worktreeBase(root, primaryPath string) string {
+	return filepath.Join(root, strings.TrimPrefix(primaryPath, string(filepath.Separator)))
+}
+
+// chooseWorktreeDir draws a random directory name under base. The name is
+// meaningless on purpose: the branch <-> path mapping always lives in git
+// (worktree list --porcelain), so nothing may depend on the directory name.
+// A candidate is redrawn when it is registered as a worktree (including
+// prunable leftovers) or already exists on disk.
+func chooseWorktreeDir(base string, entries []worktreeEntry) (string, error) {
+	registered := make(map[string]bool, len(entries))
 	for _, e := range entries {
-		byPath[e.Path] = e
+		registered[e.Path] = true
 	}
-	for _, c := range candidates {
-		e, taken := byPath[c]
-		if !taken || e.Branch == branch {
-			return c, nil
+	for range maxNameAttempts {
+		name, err := randomDirName()
+		if err != nil {
+			return "", err
 		}
+		dir := filepath.Join(base, name)
+		if registered[dir] {
+			continue
+		}
+		if _, err := os.Lstat(dir); err == nil {
+			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return "", fmt.Errorf("check worktree directory %s: %w", dir, err)
+		}
+		return dir, nil
 	}
-	return "", fmt.Errorf("no available worktree directory for branch %q: all hash candidates collide", branch)
+	return "", fmt.Errorf("no available worktree directory under %s after %d attempts", base, maxNameAttempts)
 }
