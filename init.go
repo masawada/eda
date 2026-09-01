@@ -24,13 +24,17 @@ func cmdInit(stdout io.Writer, args []string) error {
 	if len(args) != 1 {
 		return fmt.Errorf("usage: eda init - <shell>")
 	}
+	var script string
 	switch args[0] {
 	case "zsh":
-		fmt.Fprint(stdout, zshScript)
+		script = zshScript
 	case "bash":
-		fmt.Fprint(stdout, bashScript)
+		script = bashScript
 	default:
 		return fmt.Errorf("unsupported shell %q (zsh and bash are supported)", args[0])
 	}
-	return nil
+	// The emitted script is eval'd by the shell; a partial write must not
+	// look like success.
+	_, err := fmt.Fprint(stdout, script)
+	return err
 }

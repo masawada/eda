@@ -27,7 +27,7 @@ commands:
 func main() {
 	cwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "eda: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "eda: %v\n", err)
 		os.Exit(1)
 	}
 	os.Exit(run(os.Stdin, os.Stdout, os.Stderr, os.Args[1:], cwd))
@@ -38,7 +38,7 @@ func main() {
 // stderr. Shell integration and the Claude Code hooks rely on this contract.
 func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) int {
 	if len(args) == 0 {
-		fmt.Fprint(stderr, usage)
+		_, _ = fmt.Fprint(stderr, usage)
 		return 2
 	}
 	cmd, rest := args[0], args[1:]
@@ -61,11 +61,11 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) i
 	case "hook":
 		err = cmdHook(stdin, stdout, stderr, rest, cwd)
 	default:
-		fmt.Fprintf(stderr, "eda: unknown command %q\n%s", cmd, usage)
+		_, _ = fmt.Fprintf(stderr, "eda: unknown command %q\n%s", cmd, usage)
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "eda: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "eda: %v\n", err)
 		return 1
 	}
 	return 0
@@ -156,7 +156,9 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 		if len(notes) > 0 {
 			line += "\t[" + strings.Join(notes, ",") + "]"
 		}
-		fmt.Fprintln(stdout, line)
+		if _, err := fmt.Fprintln(stdout, line); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -206,10 +208,9 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "primary %s\n", ctx.PrimaryPath)
-	fmt.Fprintf(stdout, "worktree %s\n", strings.TrimSpace(top))
-	fmt.Fprintf(stdout, "branch %s\n", strings.TrimSpace(branch))
-	return nil
+	_, err = fmt.Fprintf(stdout, "primary %s\nworktree %s\nbranch %s\n",
+		ctx.PrimaryPath, strings.TrimSpace(top), strings.TrimSpace(branch))
+	return err
 }
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
@@ -278,9 +279,10 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 			var refusal refusalError
 			if errors.As(err, &refusal) {
 				// Keeping a worktree that still holds work is a valid
-				// outcome for the hook, not a failure.
-				fmt.Fprintf(stderr, "eda: worktree kept: %v\n", err)
-				return nil
+				// outcome for the hook, not a failure — but the caller
+				// relies on this report, so a failed write is one.
+				_, werr := fmt.Fprintf(stderr, "eda: worktree kept: %v\n", err)
+				return werr
 			}
 			return err
 		}
