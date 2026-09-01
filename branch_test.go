@@ -13,7 +13,10 @@ func TestValidateBranchName(t *testing.T) {
 			t.Errorf("validateBranchName(%q) = %v, want nil", name, err)
 		}
 	}
-	invalid := []string{"", "-flag", "refs/heads/foo", "origin/foo", "has space", "a..b", "trailing/", "@{-1}", "@"}
+	// "HEAD" passes check-ref-format but git's branch commands refuse it;
+	// letting it through would surface a raw `git worktree add -b` error
+	// instead of eda's own validation message.
+	invalid := []string{"", "-flag", "refs/heads/foo", "origin/foo", "has space", "a..b", "trailing/", "@{-1}", "@", "HEAD"}
 	for _, name := range invalid {
 		if err := validateBranchName(repo, name); err == nil {
 			t.Errorf("validateBranchName(%q) = nil, want error", name)

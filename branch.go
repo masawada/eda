@@ -18,8 +18,10 @@ func validateBranchName(dir, name string) error {
 	if strings.HasPrefix(name, "refs/") {
 		return fmt.Errorf("branch must be a short name, not a full ref: %q", name)
 	}
-	// "@" alone is git's alias for HEAD, not a usable branch name.
-	if name == "@" {
+	// "@" alone is git's alias for HEAD, not a usable branch name. "HEAD"
+	// itself passes check-ref-format but git's branch commands refuse it,
+	// so reject it here instead of leaking a raw git error later.
+	if name == "@" || name == "HEAD" {
 		return fmt.Errorf("invalid branch name %q", name)
 	}
 	// A branch literally named "origin/x" is technically legal in git, but
