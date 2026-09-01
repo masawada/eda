@@ -162,7 +162,11 @@ func TestResolveWorktreeRollsBackOnCopyFailure(t *testing.T) {
 	}
 	// The directory name is random, so check that nothing is left under the
 	// repo's worktree base instead of probing a known path.
-	if left, err := os.ReadDir(worktreeBase(root, repo)); err == nil && len(left) > 0 {
+	left, err := os.ReadDir(worktreeBase(root, repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) > 0 {
 		t.Errorf("worktree base must be empty after rollback, found %v", left)
 	}
 	if ok, _ := localBranchExists(repo, "feature-x"); ok {

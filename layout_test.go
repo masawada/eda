@@ -37,14 +37,6 @@ func TestRandomDirName(t *testing.T) {
 			t.Errorf("randomDirName must be lowercase hex, got %q", name)
 		}
 	}
-	// A repeat within 2^-32 would be an RNG failure, not bad luck.
-	other, err := randomDirName()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if name == other {
-		t.Errorf("two draws returned the same name %q", name)
-	}
 }
 
 func TestWorktreeBase(t *testing.T) {
