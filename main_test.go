@@ -24,12 +24,13 @@ func TestRunSwitchPrintsPathOnly(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	want := canonicalDir(root, repo, "feature-a") + "\n"
-	if stdout != want {
-		t.Errorf("stdout = %q, want %q (absolute path, one line, nothing else)", stdout, want)
+	dir, ok := strings.CutSuffix(stdout, "\n")
+	if !ok || strings.Contains(dir, "\n") {
+		t.Fatalf("stdout = %q, want an absolute path, one line, nothing else", stdout)
 	}
-	if _, err := os.Stat(strings.TrimSpace(stdout)); err != nil {
-		t.Errorf("printed worktree must exist: %v", err)
+	assertWorktreeDir(t, root, repo, dir)
+	if got := strings.TrimSpace(gitT(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "feature-a" {
+		t.Errorf("printed worktree HEAD = %q, want feature-a", got)
 	}
 }
 
@@ -234,9 +235,13 @@ func TestRunHookWorktreeCreate(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("hook worktree-create: exit=%d stderr=%q", code, stderr)
 	}
-	want := canonicalDir(root, repo, "agent-abc") + "\n"
-	if stdout != want {
-		t.Errorf("stdout = %q, want %q", stdout, want)
+	dir, ok := strings.CutSuffix(stdout, "\n")
+	if !ok || strings.Contains(dir, "\n") {
+		t.Fatalf("stdout = %q, want an absolute path, one line, nothing else", stdout)
+	}
+	assertWorktreeDir(t, root, repo, dir)
+	if got := strings.TrimSpace(gitT(t, dir, "rev-parse", "--abbrev-ref", "HEAD")); got != "agent-abc" {
+		t.Errorf("printed worktree HEAD = %q, want agent-abc", got)
 	}
 }
 

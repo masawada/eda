@@ -7,7 +7,7 @@ import (
 
 // validateBranchName accepts only branch short names. Full refs, remote
 // prefixed names, and anything git itself rejects are refused so the rest of
-// eda can treat the name as both a ref and a hash input without ambiguity.
+// eda can treat the name as a ref without ambiguity.
 func validateBranchName(dir, name string) error {
 	if name == "" {
 		return fmt.Errorf("branch name is empty")
@@ -32,8 +32,8 @@ func validateBranchName(dir, name string) error {
 	}
 	// check-ref-format --branch expands the previous-checkout shorthand
 	// (e.g. "@{-1}") to a different name, which eda would then use verbatim
-	// as its ref and hash input. Validate against the literal ref form so
-	// only genuine short names pass.
+	// as its ref. Validate against the literal ref form so only genuine
+	// short names pass.
 	if _, err := runGit(dir, "check-ref-format", "refs/heads/"+name); err != nil {
 		return fmt.Errorf("invalid branch name %q", name)
 	}

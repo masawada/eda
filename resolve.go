@@ -61,8 +61,7 @@ func resolveWorktreeDir(ctx *repoContext, cwd, branch string) (dir string, creat
 	if err != nil {
 		return "", false, false, err
 	}
-	candidates := worktreeDirCandidates(root, ctx.PrimaryPath, branch)
-	dir, err = chooseWorktreeDir(candidates, branch, ctx.Entries)
+	dir, err = chooseWorktreeDir(worktreeBase(root, ctx.PrimaryPath), ctx.Entries)
 	if err != nil {
 		return "", false, false, err
 	}

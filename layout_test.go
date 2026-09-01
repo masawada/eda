@@ -1,101 +1,96 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestBranchHash(t *testing.T) {
-	h1 := branchHash("feature/foo")
-	h2 := branchHash("feature/foo")
-	h3 := branchHash("feature/bar")
-	if h1 != h2 {
-		t.Errorf("branchHash is not deterministic: %q != %q", h1, h2)
+// stubDirNames replaces randomDirName with a deterministic sequence for the
+// duration of the test.
+func stubDirNames(t *testing.T, names ...string) {
+	t.Helper()
+	orig := randomDirName
+	i := 0
+	randomDirName = func() (string, error) {
+		if i >= len(names) {
+			t.Fatalf("randomDirName called %d times, only %d names stubbed", i+1, len(names))
+		}
+		n := names[i]
+		i++
+		return n, nil
 	}
-	if h1 == h3 {
-		t.Errorf("different branches must hash differently: %q == %q", h1, h3)
+	t.Cleanup(func() { randomDirName = orig })
+}
+
+func TestRandomDirName(t *testing.T) {
+	name, err := randomDirName()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(h1) != 64 {
-		t.Errorf("branchHash must return full sha256 hex (64 chars), got %d", len(h1))
+	if len(name) != 8 {
+		t.Errorf("randomDirName must return 8 characters, got %d (%q)", len(name), name)
 	}
-	for _, c := range h1 {
+	for _, c := range name {
 		if !strings.ContainsRune("0123456789abcdef", c) {
-			t.Errorf("branchHash must be lowercase hex, got %q", h1)
+			t.Errorf("randomDirName must be lowercase hex, got %q", name)
 		}
 	}
 }
 
-func TestWorktreeDirCandidates(t *testing.T) {
-	got := worktreeDirCandidates("/root", "/home/user/repo", "feature/foo")
-	if len(got) != 4 {
-		t.Fatalf("want 4 candidates (hash lengths 8/16/32/64), got %d: %v", len(got), got)
-	}
-	h := branchHash("feature/foo")
-	want := []string{
-		"/root/home/user/repo/" + h[:8],
-		"/root/home/user/repo/" + h[:16],
-		"/root/home/user/repo/" + h[:32],
-		"/root/home/user/repo/" + h,
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("candidate[%d] = %q, want %q", i, got[i], want[i])
-		}
+func TestWorktreeBase(t *testing.T) {
+	got := worktreeBase("/root", "/home/user/repo")
+	if want := "/root/home/user/repo"; got != want {
+		t.Errorf("worktreeBase() = %q, want %q", got, want)
 	}
 }
 
 func TestChooseWorktreeDir(t *testing.T) {
-	candidates := []string{"/root/repo/aaaa", "/root/repo/bbbb", "/root/repo/cccc"}
-	tests := []struct {
-		name    string
-		entries []worktreeEntry
-		want    string
-		wantErr bool
-	}{
-		{
-			name:    "no existing entries picks first candidate",
-			entries: nil,
-			want:    "/root/repo/aaaa",
-		},
-		{
-			name: "existing entry for the same branch is reused",
-			entries: []worktreeEntry{
-				{Path: "/root/repo/aaaa", Branch: "feature/foo"},
-			},
-			want: "/root/repo/aaaa",
-		},
-		{
-			name: "collision with another branch extends to next candidate",
-			entries: []worktreeEntry{
-				{Path: "/root/repo/aaaa", Branch: "other"},
-			},
-			want: "/root/repo/bbbb",
-		},
-		{
-			name: "all candidates taken by other branches",
-			entries: []worktreeEntry{
-				{Path: "/root/repo/aaaa", Branch: "a"},
-				{Path: "/root/repo/bbbb", Branch: "b"},
-				{Path: "/root/repo/cccc", Branch: "c"},
-			},
-			wantErr: true,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := chooseWorktreeDir(candidates, "feature/foo", tt.entries)
-			if tt.wantErr {
-				if err == nil {
-					t.Fatalf("want error, got %q", got)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("chooseWorktreeDir() = %q, want %q", got, tt.want)
-			}
-		})
-	}
+	base := t.TempDir()
+
+	t.Run("free name is taken on the first draw", func(t *testing.T) {
+		stubDirNames(t, "aaaa1111")
+		got, err := chooseWorktreeDir(base, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(base, "aaaa1111"); got != want {
+			t.Errorf("chooseWorktreeDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("porcelain-registered name is redrawn", func(t *testing.T) {
+		stubDirNames(t, "aaaa1111", "bbbb2222")
+		entries := []worktreeEntry{{Path: filepath.Join(base, "aaaa1111"), Branch: "other"}}
+		got, err := chooseWorktreeDir(base, entries)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(base, "bbbb2222"); got != want {
+			t.Errorf("chooseWorktreeDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("name existing on disk is redrawn", func(t *testing.T) {
+		if err := os.Mkdir(filepath.Join(base, "cccc3333"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stubDirNames(t, "cccc3333", "dddd4444")
+		got, err := chooseWorktreeDir(base, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := filepath.Join(base, "dddd4444"); got != want {
+			t.Errorf("chooseWorktreeDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("exhausting the attempts is an error", func(t *testing.T) {
+		stubDirNames(t, "eeee5555", "eeee5555", "eeee5555", "eeee5555")
+		entries := []worktreeEntry{{Path: filepath.Join(base, "eeee5555"), Branch: "other"}}
+		if got, err := chooseWorktreeDir(base, entries); err == nil {
+			t.Fatalf("want error after exhausting attempts, got %q", got)
+		}
+	})
 }

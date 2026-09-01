@@ -57,8 +57,12 @@ command fails if any branch failed.
 Worktrees live outside the repository, keyed by the primary checkout path:
 
 ```
-<worktreeRoot>/<absolute path of the primary checkout>/<branch hash>/
+<worktreeRoot>/<absolute path of the primary checkout>/<random name>/
 ```
+
+The directory name is a random string and carries no meaning: the mapping
+between branches and paths always lives in git, so renaming a branch with
+`git branch -m` needs no follow-up.
 
 The root defaults to `~/.local/share/worktrees` and is configured through
 git config:
