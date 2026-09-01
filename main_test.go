@@ -58,25 +58,6 @@ func TestRunRoot(t *testing.T) {
 	}
 }
 
-func TestRunPath(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx, _ := loadRepoWithRoot(t, repo)
-	wt := mustResolve(t, ctx, repo, "topic")
-
-	code, stdout, _ := runEda(t, repo, "", "path", "topic")
-	if code != 0 || stdout != wt+"\n" {
-		t.Errorf("path: code=%d stdout=%q, want 0 and %q", code, stdout, wt+"\n")
-	}
-	// path never creates: an unknown branch is an error.
-	code, stdout, _ = runEda(t, repo, "", "path", "nope")
-	if code == 0 {
-		t.Error("path for a branch without worktree must fail")
-	}
-	if stdout != "" {
-		t.Errorf("stdout must stay empty on error, got %q", stdout)
-	}
-}
-
 func TestRunList(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)

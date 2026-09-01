@@ -15,7 +15,6 @@ const usage = `usage: eda <command> [arguments]
 
 commands:
   switch <branch>               resolve or create the worktree for a branch and print its path
-  path <branch>                 print the worktree path for a branch (never creates)
   list                          list worktrees of the current repository
   remove [--force] <branch>...  remove worktrees and their branches as pairs
   root                          print the primary checkout path
@@ -47,8 +46,6 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) i
 	switch cmd {
 	case "switch":
 		err = cmdSwitch(stdout, rest, cwd)
-	case "path":
-		err = cmdPath(stdout, rest, cwd)
 	case "list":
 		err = cmdList(stdout, rest, cwd)
 	case "remove":
@@ -103,26 +100,6 @@ func cmdSwitch(stdout io.Writer, args []string, cwd string) error {
 		return err
 	}
 	return printPath(stdout, dir)
-}
-
-func cmdPath(stdout io.Writer, args []string, cwd string) error {
-	branch, err := singleBranchArg("path", args)
-	if err != nil {
-		return err
-	}
-	ctx, err := loadRepo(cwd)
-	if err != nil {
-		return err
-	}
-	for _, e := range ctx.Entries {
-		if !e.Bare && !e.Detached && e.Branch == branch {
-			if e.Prunable {
-				return fmt.Errorf("worktree registration for %q at %s is stale; run `git worktree prune`", branch, e.Path)
-			}
-			return printPath(stdout, e.Path)
-		}
-	}
-	return fmt.Errorf("no worktree for branch %q", branch)
 }
 
 func cmdList(stdout io.Writer, args []string, cwd string) error {
