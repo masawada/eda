@@ -144,6 +144,26 @@ func TestRunRemoveMultipleBestEffort(t *testing.T) {
 	}
 }
 
+func TestRunRemoveDuplicateBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+
+	// The second occurrence must see the state after the first removal and
+	// be refused as unknown, not operate on the already-deleted path.
+	code, _, stderr := runEda(t, repo, "", "remove", "topic", "topic")
+	if code == 0 {
+		t.Fatal("duplicate branch must fail the command")
+	}
+	assertRemoved(t, repo, wt, "topic")
+	if !strings.Contains(stderr, `no worktree found for branch "topic"`) {
+		t.Errorf("stderr must report the branch as unknown, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "failed to remove 1 of 2") {
+		t.Errorf("stderr must summarize the failures, got %q", stderr)
+	}
+}
+
 func TestRunRemoveSingleKeepsErrorFormat(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)

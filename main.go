@@ -188,7 +188,16 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 		return removeWorktree(ctx, branches[0], *force)
 	}
 	failed := 0
-	for _, branch := range branches {
+	for i, branch := range branches {
+		// Each removal changes the worktree list, so later branches need a
+		// fresh context (a duplicate argument must be refused as unknown,
+		// not operate on the already-deleted path). PrimaryPath is stable
+		// even when the starting directory itself was just removed.
+		if i > 0 {
+			if ctx, err = loadRepo(ctx.PrimaryPath); err != nil {
+				return err
+			}
+		}
 		if err := removeWorktree(ctx, branch, *force); err != nil {
 			failed++
 			// A failed diagnostics write aborts the run: the caller relies
