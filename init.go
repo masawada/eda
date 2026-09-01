@@ -26,9 +26,9 @@ func cmdInit(stdout io.Writer, args []string) error {
 	}
 	switch args[0] {
 	case "zsh":
-		fmt.Fprint(stdout, zshScript)
+		_, _ = fmt.Fprint(stdout, zshScript)
 	case "bash":
-		fmt.Fprint(stdout, bashScript)
+		_, _ = fmt.Fprint(stdout, bashScript)
 	default:
 		return fmt.Errorf("unsupported shell %q (zsh and bash are supported)", args[0])
 	}
