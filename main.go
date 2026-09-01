@@ -14,15 +14,15 @@ import (
 const usage = `usage: eda <command> [arguments]
 
 commands:
-  switch <branch>          resolve or create the worktree for a branch and print its path
-  path <branch>            print the worktree path for a branch (never creates)
-  list                     list worktrees of the current repository
+  switch <branch>               resolve or create the worktree for a branch and print its path
+  path <branch>                 print the worktree path for a branch (never creates)
+  list                          list worktrees of the current repository
   remove [--force] <branch>...  remove worktrees and their branches as pairs
-  root                     print the primary checkout path
-  status                   print current repository, worktree, and branch
-  init - <shell>           print the shell integration script (zsh, bash)
-  hook worktree-create     Claude Code WorktreeCreate hook entrypoint (stdin JSON)
-  hook worktree-remove     Claude Code WorktreeRemove hook entrypoint (stdin JSON)
+  root                          print the primary checkout path
+  status                        print current repository, worktree, and branch
+  init - <shell>                print the shell integration script (zsh, bash)
+  hook worktree-create          Claude Code WorktreeCreate hook entrypoint (stdin JSON)
+  hook worktree-remove          Claude Code WorktreeRemove hook entrypoint (stdin JSON)
 `
 
 func main() {
