@@ -16,7 +16,7 @@ commands:
   switch <branch>          resolve or create the worktree for a branch and print its path
   path <branch>            print the worktree path for a branch (never creates)
   list                     list worktrees of the current repository
-  remove [--force] <branch>  remove a worktree and its branch as a pair
+  remove [--force] <branch>...  remove worktrees and their branches as pairs
   root                     print the primary checkout path
   status                   print current repository, worktree, and branch
   init - <shell>           print the shell integration script (zsh, bash)
@@ -163,6 +163,10 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 	return nil
 }
 
+// cmdRemove removes each branch independently (best effort): a refused or
+// failed branch does not stop the rest, and the command fails if any branch
+// failed. Branches are processed in the given order; with stacked worktrees
+// an unfavorable order can refuse a branch that a re-run would remove.
 func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	fs := flag.NewFlagSet("remove", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -170,15 +174,43 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	branch, err := singleBranchArg("remove [--force]", fs.Args())
-	if err != nil {
-		return err
+	branches := fs.Args()
+	if len(branches) == 0 {
+		return fmt.Errorf("usage: eda remove [--force] <branch> [<branch>...]")
 	}
 	ctx, err := loadRepo(cwd)
 	if err != nil {
 		return err
 	}
-	return removeWorktree(ctx, branch, *force)
+	// A single branch keeps the plain one-line error; the per-branch prefix
+	// and the summary would only repeat it.
+	if len(branches) == 1 {
+		return removeWorktree(ctx, branches[0], *force)
+	}
+	failed := 0
+	for i, branch := range branches {
+		// Each removal changes the worktree list, so later branches need a
+		// fresh context (a duplicate argument must be refused as unknown,
+		// not operate on the already-deleted path). PrimaryPath is stable
+		// even when the starting directory itself was just removed.
+		if i > 0 {
+			if ctx, err = loadRepo(ctx.PrimaryPath); err != nil {
+				return err
+			}
+		}
+		if err := removeWorktree(ctx, branch, *force); err != nil {
+			failed++
+			// A failed diagnostics write aborts the run: the caller relies
+			// on this report, like the kept-report in cmdHook.
+			if _, werr := fmt.Fprintf(stderr, "eda: remove %s: %v\n", branch, err); werr != nil {
+				return werr
+			}
+		}
+	}
+	if failed > 0 {
+		return fmt.Errorf("failed to remove %d of %d worktrees", failed, len(branches))
+	}
+	return nil
 }
 
 func cmdRoot(stdout io.Writer, args []string, cwd string) error {

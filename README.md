@@ -31,7 +31,7 @@ directory and provides completion.
 ```console
 $ eda switch <branch>   # resolve or create the worktree and move there
 $ eda list              # list worktrees of the current repository
-$ eda remove <branch>   # remove a worktree and its branch as a pair
+$ eda remove <branch>...  # remove worktrees and their branches as pairs
 $ eda root              # move back to the primary checkout
 $ eda path <branch>     # print the worktree path (never creates)
 $ eda status            # print current repository, worktree, and branch
@@ -48,7 +48,9 @@ nothing would be lost: the worktree must be clean, and the branch must
 either have no commits unreachable from other refs, or have a gone upstream
 (the state `git fetch --prune` leaves after the remote branch was deleted,
 e.g. by a squash merge). A pushed branch that is still under review is
-protected. Use `--force` to override.
+protected. Use `--force` to override. With several branches each one is
+removed independently: a refused branch does not stop the rest, and the
+command fails if any branch failed.
 
 ## Worktree placement
 
