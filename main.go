@@ -176,7 +176,7 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	}
 	branches := fs.Args()
 	if len(branches) == 0 {
-		return fmt.Errorf("usage: eda remove [--force] <branch>...")
+		return fmt.Errorf("usage: eda remove [--force] <branch> [<branch>...]")
 	}
 	ctx, err := loadRepo(cwd)
 	if err != nil {
