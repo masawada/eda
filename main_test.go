@@ -94,6 +94,56 @@ func TestRunList(t *testing.T) {
 	}
 }
 
+func TestRunListAlignsColumns(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "a-much-longer-branch-name")
+	// EvalSymlinks matches what git prints (/tmp vs /private/tmp on macOS).
+	extBase, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ext := filepath.Join(extBase, "manual-worktree-with-a-longer-name")
+	gitT(t, repo, "worktree", "add", "-q", "-b", "manual", ext)
+	gitT(t, repo, "worktree", "lock", ext)
+
+	code, stdout, _ := runEda(t, repo, "", "list")
+	if code != 0 {
+		t.Fatalf("list: exit = %d", code)
+	}
+	if strings.Contains(stdout, "\t") {
+		t.Errorf("list output must be space-aligned, not tab-separated, got %q", stdout)
+	}
+	lines := strings.Split(strings.TrimSuffix(stdout, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("list must print one line per worktree, got %q", stdout)
+	}
+	// Notes sit right after the branch name, not in a trailing column where
+	// long paths would push them out of sight.
+	if !strings.HasPrefix(lines[0], "main[primary] ") {
+		t.Errorf("line must start with the annotated name, got %q", lines[0])
+	}
+	if !strings.HasPrefix(lines[2], "manual[external,locked] ") {
+		t.Errorf("line must start with the annotated name, got %q", lines[2])
+	}
+	column := func(line, cell string) int {
+		t.Helper()
+		i := strings.Index(line, cell)
+		if i < 0 {
+			t.Fatalf("line %q must contain %q", line, cell)
+		}
+		return i
+	}
+	if column(lines[0], repo) != column(lines[1], wt) || column(lines[1], wt) != column(lines[2], ext) {
+		t.Errorf("paths must start at the same column:\n%s", stdout)
+	}
+	for _, line := range lines {
+		if strings.TrimRight(line, " ") != line {
+			t.Errorf("line must not have trailing spaces, got %q", line)
+		}
+	}
+}
+
 func TestRunRemove(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
@@ -219,7 +269,8 @@ func TestRunStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("status: exit = %d", code)
 	}
-	for _, want := range []string{"branch topic\n", "worktree " + wt + "\n", "primary " + repo + "\n"} {
+	// Labels are padded to a common width so the values line up.
+	for _, want := range []string{"branch   topic\n", "worktree " + wt + "\n", "primary  " + repo + "\n"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status output missing %q, got %q", want, stdout)
 		}

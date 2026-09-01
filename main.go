@@ -8,20 +8,21 @@ import (
 	"io"
 	"os"
 	"strings"
+	"text/tabwriter"
 )
 
 const usage = `usage: eda <command> [arguments]
 
 commands:
-  switch <branch>          resolve or create the worktree for a branch and print its path
-  path <branch>            print the worktree path for a branch (never creates)
-  list                     list worktrees of the current repository
+  switch <branch>               resolve or create the worktree for a branch and print its path
+  path <branch>                 print the worktree path for a branch (never creates)
+  list                          list worktrees of the current repository
   remove [--force] <branch>...  remove worktrees and their branches as pairs
-  root                     print the primary checkout path
-  status                   print current repository, worktree, and branch
-  init - <shell>           print the shell integration script (zsh, bash)
-  hook worktree-create     Claude Code WorktreeCreate hook entrypoint (stdin JSON)
-  hook worktree-remove     Claude Code WorktreeRemove hook entrypoint (stdin JSON)
+  root                          print the primary checkout path
+  status                        print current repository, worktree, and branch
+  init - <shell>                print the shell integration script (zsh, bash)
+  hook worktree-create          Claude Code WorktreeCreate hook entrypoint (stdin JSON)
+  hook worktree-remove          Claude Code WorktreeRemove hook entrypoint (stdin JSON)
 `
 
 func main() {
@@ -132,6 +133,7 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
+	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	for i, e := range ctx.Entries {
 		name := e.Branch
 		var notes []string
@@ -152,15 +154,16 @@ func cmdList(stdout io.Writer, args []string, cwd string) error {
 		if e.Prunable {
 			notes = append(notes, "prunable")
 		}
-		line := fmt.Sprintf("%s\t%s", name, e.Path)
+		// Notes stick to the name: long paths would push a trailing notes
+		// column out of sight.
 		if len(notes) > 0 {
-			line += "\t[" + strings.Join(notes, ",") + "]"
+			name += "[" + strings.Join(notes, ",") + "]"
 		}
-		if _, err := fmt.Fprintln(stdout, line); err != nil {
+		if _, err := fmt.Fprintf(tw, "%s\t%s\n", name, e.Path); err != nil {
 			return err
 		}
 	}
-	return nil
+	return tw.Flush()
 }
 
 // cmdRemove removes each branch independently (best effort): a refused or
@@ -240,7 +243,7 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "primary %s\nworktree %s\nbranch %s\n",
+	_, err = fmt.Fprintf(stdout, "primary  %s\nworktree %s\nbranch   %s\n",
 		ctx.PrimaryPath, strings.TrimSpace(top), strings.TrimSpace(branch))
 	return err
 }
