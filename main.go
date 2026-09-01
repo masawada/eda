@@ -243,7 +243,7 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(stdout, "primary %s\nworktree %s\nbranch %s\n",
+	_, err = fmt.Fprintf(stdout, "primary  %s\nworktree %s\nbranch   %s\n",
 		ctx.PrimaryPath, strings.TrimSpace(top), strings.TrimSpace(branch))
 	return err
 }

@@ -269,7 +269,8 @@ func TestRunStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("status: exit = %d", code)
 	}
-	for _, want := range []string{"branch topic\n", "worktree " + wt + "\n", "primary " + repo + "\n"} {
+	// Labels are padded to a common width so the values line up.
+	for _, want := range []string{"branch   topic\n", "worktree " + wt + "\n", "primary  " + repo + "\n"} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status output missing %q, got %q", want, stdout)
 		}
