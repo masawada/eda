@@ -211,6 +211,46 @@ func TestRunRootFailsOnBrokenStdout(t *testing.T) {
 	}
 }
 
+func TestRunListFailsOnBrokenStdout(t *testing.T) {
+	repo := newTestRepo(t)
+	loadRepoWithRoot(t, repo)
+	var stderr strings.Builder
+	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"list"}, repo); code == 0 {
+		t.Error("a failed list write must fail the command, not report success")
+	}
+}
+
+func TestRunStatusFailsOnBrokenStdout(t *testing.T) {
+	repo := newTestRepo(t)
+	loadRepoWithRoot(t, repo)
+	var stderr strings.Builder
+	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"status"}, repo); code == 0 {
+		t.Error("a failed status write must fail the command, not report success")
+	}
+}
+
+func TestRunInitFailsOnBrokenStdout(t *testing.T) {
+	repo := newTestRepo(t)
+	var stderr strings.Builder
+	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"init", "-", "zsh"}, repo); code == 0 {
+		t.Error("a failed script write must fail the command, not report success")
+	}
+}
+
+func TestRunHookWorktreeRemoveKeptReportFails(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
+
+	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
+	var stdout strings.Builder
+	if code := run(strings.NewReader(stdin), &stdout, failWriter{}, []string{"hook", "worktree-remove"}, repo); code == 0 {
+		t.Error("an undeliverable kept-report must fail the hook, not report success")
+	}
+	assertKept(t, repo, wt, "agent-abc")
+}
+
 func TestRunListMarksExternalWorktree(t *testing.T) {
 	repo := newTestRepo(t)
 	wt := filepath.Join(t.TempDir(), "manual-wt")
