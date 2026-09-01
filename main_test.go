@@ -105,6 +105,75 @@ func TestRunRemove(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRunRemoveMultiple(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "topic-a")
+	wtB := mustResolve(t, ctx, repo, "topic-b")
+
+	code, _, stderr := runEda(t, repo, "", "remove", "topic-a", "topic-b")
+	if code != 0 {
+		t.Fatalf("remove: exit=%d stderr=%q", code, stderr)
+	}
+	if stderr != "" {
+		t.Errorf("stderr must stay empty on success, got %q", stderr)
+	}
+	assertRemoved(t, repo, wtA, "topic-a")
+	assertRemoved(t, repo, wtB, "topic-b")
+}
+
+func TestRunRemoveMultipleBestEffort(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "topic-a")
+	wtB := mustResolve(t, ctx, repo, "topic-b")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "unique work")
+
+	// topic-a is refused but topic-b must still be removed.
+	code, _, stderr := runEda(t, repo, "", "remove", "topic-a", "topic-b")
+	if code == 0 {
+		t.Fatal("a refused branch must fail the command")
+	}
+	assertKept(t, repo, wtA, "topic-a")
+	assertRemoved(t, repo, wtB, "topic-b")
+	if !strings.Contains(stderr, "remove topic-a:") {
+		t.Errorf("stderr must name the refused branch, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "failed to remove 1 of 2") {
+		t.Errorf("stderr must summarize the failures, got %q", stderr)
+	}
+}
+
+func TestRunRemoveSingleKeepsErrorFormat(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "unique work")
+
+	// A single branch keeps the one-line error without the per-branch
+	// prefix or the summary line.
+	code, _, stderr := runEda(t, repo, "", "remove", "topic")
+	if code == 0 {
+		t.Fatal("unsafe removal must fail")
+	}
+	if strings.Contains(stderr, "remove topic:") || strings.Contains(stderr, "failed to remove") {
+		t.Errorf("single-branch error must keep the plain format, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "topic")
+}
+
+func TestRunRemoveNoBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	loadRepoWithRoot(t, repo)
+	code, _, stderr := runEda(t, repo, "", "remove")
+	if code == 0 {
+		t.Error("remove without branches must fail")
+	}
+	if !strings.Contains(stderr, "usage") {
+		t.Errorf("stderr must include usage, got %q", stderr)
+	}
+}
+
 func TestRunRemoveForce(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)

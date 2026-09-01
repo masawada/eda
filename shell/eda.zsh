@@ -27,7 +27,7 @@ _eda() {
     'switch:resolve or create the worktree for a branch and move there'
     'path:print the worktree path for a branch'
     'list:list worktrees of the current repository'
-    'remove:remove a worktree and its branch as a pair'
+    'remove:remove worktrees and their branches as pairs'
     'root:move to the primary checkout'
     'status:print current repository, worktree, and branch'
   )
