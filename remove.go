@@ -131,18 +131,25 @@ func branchSafeToDelete(dir, branch string) (bool, string, error) {
 		}
 	}
 
+	// Count commits reachable from the branch but from no other ref. git's
+	// --exclude only applies to the single following pseudo-ref option and
+	// is then reset, which makes excluding the branch from both --branches
+	// and --remotes error-prone; instead enumerate the refs and negate each
+	// explicitly. (This materializes refs into argv; a repository with a
+	// pathologically large ref namespace could hit the OS argument limit,
+	// which we accept for now.)
 	refs, err := listRefs(dir)
 	if err != nil {
 		return false, "", err
 	}
 	self := "refs/heads/" + branch
-	others := make([]string, 0, len(refs))
+	args := make([]string, 0, len(refs)+4)
+	args = append(args, "rev-list", "--count", self, "--not")
 	for _, r := range refs {
 		if r != self && r != upstream {
-			others = append(others, r)
+			args = append(args, r)
 		}
 	}
-	args := append([]string{"rev-list", "--count", self, "--not"}, others...)
 	out, err := runGit(dir, args...)
 	if err != nil {
 		return false, "", err
