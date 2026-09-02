@@ -196,6 +196,29 @@ func TestRunRemoveMultipleFromInvokingWorktree(t *testing.T) {
 	assertRemoved(t, repo, wtB, "b")
 }
 
+func TestRunRemoveFromInsideViaSymlink(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "unique work")
+
+	// Entered through a symlink, the invoking directory must still be
+	// recognized as the worktree being removed, so the primary HEAD is the
+	// base and not the worktree's own HEAD.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(wt, link); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runEda(t, link, "", "remove", "topic")
+	if code == 0 {
+		t.Fatal("unmerged branch must be refused from inside its own worktree")
+	}
+	if !strings.Contains(stderr, "the HEAD of the primary checkout") {
+		t.Errorf("stderr must name the primary HEAD as the base, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "topic")
+}
+
 func TestRunRemoveDuplicateBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)

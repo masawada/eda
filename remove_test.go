@@ -1,8 +1,10 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -262,10 +264,21 @@ func TestRemoveWorktreeGoneUpstream(t *testing.T) {
 
 	// The upstream ref no longer resolves, so the base falls back to the
 	// primary HEAD, which does not contain the commit.
-	if err := removeFrom(t, repo, repo, "topic", false); err == nil {
-		t.Fatal("gone-upstream branch with unmerged commits must be refused")
+	err := removeFrom(t, repo, repo, "topic", false)
+	var refusal refusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("gone-upstream branch with unmerged commits must be refused, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "the HEAD of "+repo) {
+		t.Errorf("refusal must name the fallback HEAD, got %q", err)
 	}
 	assertKept(t, repo, wt, "topic")
+
+	gitT(t, repo, "merge", "-q", "--ff-only", "topic")
+	if err := removeFrom(t, repo, repo, "topic", false); err != nil {
+		t.Fatalf("gone-upstream branch merged into the primary HEAD must be removable: %v", err)
+	}
+	assertRemoved(t, repo, wt, "topic")
 }
 
 func TestRemoveWorktreeBaseFixedAcrossRemovals(t *testing.T) {
