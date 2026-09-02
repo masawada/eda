@@ -31,12 +31,16 @@ _eda() {
   case "${COMP_WORDS[1]}" in
     switch|remove)
       # Never feed ref names to compgen -W: it expands its word list, so a
-      # hostile ref name (fetched from a remote) could execute code. Append
-      # literally filtered candidates instead.
-      local ref
+      # hostile ref name (fetched from a remote) could execute code. Filter
+      # candidates literally instead, and shell-quote them on the way out:
+      # bash inserts them on the command line verbatim, where an unquoted
+      # $(...) would run on Enter.
+      local ref quoted
       while IFS= read -r ref; do
         [[ $ref == HEAD ]] && continue
-        [[ $ref == "$cur"* ]] && COMPREPLY+=("$ref")
+        [[ $ref == "$cur"* ]] || continue
+        printf -v quoted '%q' "$ref"
+        COMPREPLY+=("$quoted")
       done < <(
         {
           git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
