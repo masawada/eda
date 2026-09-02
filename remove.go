@@ -26,15 +26,63 @@ func managedWorktree(ctx *repoContext, path string) bool {
 	return strings.HasPrefix(path, ctx.WorktreeRoot+string(filepath.Separator))
 }
 
+// removeBase is the HEAD a branch without a resolvable upstream is judged
+// against, fixed once when the command starts so that every branch of one
+// invocation sees the same commits, whatever earlier removals deleted.
+type removeBase struct {
+	// Top is the realpath of the worktree the command was run in, empty
+	// when it was not run in one (the hook), and Head is the OID its HEAD
+	// pointed to.
+	Top  string
+	Head string
+	// PrimaryHead is the OID of the primary checkout's HEAD. It replaces
+	// Head for the worktree the command was run in, and is the base for
+	// everything when there is no such worktree.
+	PrimaryHead string
+}
+
+// invocationBase resolves the removeBase of a command run in cwd.
+func invocationBase(ctx *repoContext, cwd string) (removeBase, error) {
+	out, err := runGit(cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return removeBase{}, err
+	}
+	// Entries hold the realpaths git recorded; resolve the same way so the
+	// invoking worktree is recognized through a symlinked path.
+	top, err := filepath.EvalSymlinks(strings.TrimSuffix(out, "\n"))
+	if err != nil {
+		return removeBase{}, fmt.Errorf("resolve invoking worktree path: %w", err)
+	}
+	head, err := headCommit(cwd)
+	if err != nil {
+		return removeBase{}, err
+	}
+	primaryHead, err := headCommit(ctx.PrimaryPath)
+	if err != nil {
+		return removeBase{}, err
+	}
+	return removeBase{Top: top, Head: head, PrimaryHead: primaryHead}, nil
+}
+
+// headFor returns the base OID for the worktree at path and a description
+// of it for diagnostics.
+func (b removeBase) headFor(path string) (oid, desc string) {
+	if b.Top == "" || path == b.Top {
+		return b.PrimaryHead, "the HEAD of the primary checkout"
+	}
+	return b.Head, "the HEAD of " + b.Top
+}
+
 // removeWorktree deletes a worktree and its branch as a pair. Unless force
 // is set, it refuses to touch anything when the worktree is dirty or the
-// branch still has commits that no other ref can reach: "if nothing would be
-// lost it all goes away, if work remains nothing is deleted".
+// branch tip is not reachable from its base, the rule of `git branch -d`:
+// the base is the branch's upstream when that ref resolves, otherwise the
+// HEAD that base names.
 //
 // All conditions are checked before any deletion. A failure between the
 // worktree removal and the branch deletion can still leave a partial state;
 // re-running converges it.
-func removeWorktree(ctx *repoContext, branch string, force bool) error {
+func removeWorktree(ctx *repoContext, base removeBase, branch string, force bool) error {
 	if err := validateBranchName(ctx.PrimaryPath, branch); err != nil {
 		return err
 	}
@@ -69,12 +117,19 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 		if !clean {
 			return refusalf("worktree %s has uncommitted changes; commit them or use --force", entry.Path)
 		}
-		safe, reason, err := branchSafeToDelete(ctx.PrimaryPath, branch)
+		rev, desc, err := upstreamBase(ctx.PrimaryPath, branch)
 		if err != nil {
 			return err
 		}
-		if !safe {
-			return refusalf("branch %q %s; push and merge it, or use --force", branch, reason)
+		if rev == "" {
+			rev, desc = base.headFor(entry.Path)
+		}
+		reachable, err := isAncestor(ctx.PrimaryPath, "refs/heads/"+branch, rev)
+		if err != nil {
+			return err
+		}
+		if !reachable {
+			return refusalf("branch %q is not fully merged into %s; merge it or use --force", branch, desc)
 		}
 	}
 
@@ -86,8 +141,9 @@ func removeWorktree(ctx *repoContext, branch string, force bool) error {
 	if _, err := runGit(ctx.PrimaryPath, removeArgs...); err != nil {
 		return err
 	}
-	// The safety conditions above are stricter than `git branch -d` (which
-	// cannot see squash merges), so deletion itself uses -D.
+	// `git branch -d` would judge the tip again, against the HEAD of the
+	// directory it runs in rather than the base checked above, so deletion
+	// uses -D.
 	if _, err := runGit(ctx.PrimaryPath, "branch", "-q", "-D", branch); err != nil {
 		return fmt.Errorf("worktree removed but branch deletion failed: %w", err)
 	}
@@ -107,75 +163,42 @@ func worktreeClean(dir string) (bool, error) {
 	return strings.Trim(out, "\x00") == "", nil
 }
 
-// branchSafeToDelete reports whether deleting the branch loses no commits,
-// judged purely from local state:
-//
-//   - the tip is reachable from another ref (any local branch or
-//     remote-tracking ref, excluding the branch itself and its own upstream,
-//     so a pushed branch that is merely under review stays protected), or
-//   - the configured upstream is gone (its remote-tracking ref no longer
-//     exists locally, the state `git fetch --prune` leaves after the remote
-//     branch was deleted, e.g. by a squash merge).
-func branchSafeToDelete(dir, branch string) (bool, string, error) {
-	upstream, err := branchUpstream(dir, branch)
-	if err != nil {
-		return false, "", err
-	}
-	if upstream != "" {
-		exists, err := refExists(dir, upstream)
-		if err != nil {
-			return false, "", err
-		}
-		if !exists {
-			return true, "", nil
-		}
-	}
-
-	// Count commits reachable from the branch but from no other ref. git's
-	// --exclude only applies to the single following pseudo-ref option and
-	// is then reset, which makes excluding the branch from both --branches
-	// and --remotes error-prone; instead enumerate the refs and negate each
-	// explicitly. (This materializes refs into argv; a repository with a
-	// pathologically large ref namespace could hit the OS argument limit,
-	// which we accept for now.)
-	refs, err := listRefs(dir)
-	if err != nil {
-		return false, "", err
-	}
-	self := "refs/heads/" + branch
-	args := make([]string, 0, len(refs)+4)
-	args = append(args, "rev-list", "--count", self, "--not")
-	for _, r := range refs {
-		if r != self && r != upstream {
-			args = append(args, r)
-		}
-	}
-	out, err := runGit(dir, args...)
-	if err != nil {
-		return false, "", err
-	}
-	if strings.TrimSpace(out) == "0" {
-		return true, "", nil
-	}
-	return false, fmt.Sprintf("has %s commit(s) not reachable from any other ref", strings.TrimSpace(out)), nil
-}
-
-// listRefs returns the full names of all local branches and remote-tracking
-// refs.
-func listRefs(dir string) ([]string, error) {
-	out, err := runGit(dir, "for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes")
-	if err != nil {
-		return nil, err
-	}
-	return strings.Fields(out), nil
-}
-
-// branchUpstream returns the full ref of the branch's configured upstream,
-// or "" when no upstream is configured.
-func branchUpstream(dir, branch string) (string, error) {
+// upstreamBase returns the configured upstream of the branch as the ref the
+// tip must be reachable from, with a description for diagnostics, or ""
+// when no upstream is configured or its ref does not resolve (the state
+// `git fetch --prune` leaves after the remote branch was deleted). A local
+// branch set as upstream (branch.<name>.remote = .) counts as well.
+func upstreamBase(dir, branch string) (rev, desc string, err error) {
 	out, err := runGit(dir, "for-each-ref", "--format=%(upstream)", "refs/heads/"+branch)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return strings.TrimSpace(out), nil
+	upstream := strings.TrimSpace(out)
+	if upstream == "" {
+		return "", "", nil
+	}
+	exists, err := refExists(dir, upstream)
+	if err != nil {
+		return "", "", err
+	}
+	if !exists {
+		return "", "", nil
+	}
+	return upstream, "its upstream " + upstream, nil
+}
+
+// isAncestor reports whether rev is reachable from base (or equal to it).
+func isAncestor(dir, rev, base string) (bool, error) {
+	_, code, stderrMsg, err := runGitExit(dir, "merge-base", "--is-ancestor", rev, base)
+	if err != nil {
+		return false, err
+	}
+	switch code {
+	case 0:
+		return true, nil
+	case 1:
+		return false, nil
+	default:
+		return false, fmt.Errorf("git merge-base --is-ancestor %s %s: exit status %d: %s", rev, base, code, stderrMsg)
+	}
 }

@@ -166,10 +166,14 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
+	base, err := invocationBase(ctx, cwd)
+	if err != nil {
+		return err
+	}
 	// A single branch keeps the plain one-line error; the per-branch prefix
 	// and the summary would only repeat it.
 	if len(branches) == 1 {
-		return removeWorktree(ctx, branches[0], *force)
+		return removeWorktree(ctx, base, branches[0], *force)
 	}
 	failed := 0
 	for i, branch := range branches {
@@ -182,7 +186,7 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 				return err
 			}
 		}
-		if err := removeWorktree(ctx, branch, *force); err != nil {
+		if err := removeWorktree(ctx, base, branch, *force); err != nil {
 			failed++
 			// A failed diagnostics write aborts the run: the caller relies
 			// on this report, like the kept-report in cmdHook.
@@ -297,7 +301,13 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		if branch == "" {
 			return fmt.Errorf("worktree_path %s is not a branch worktree of this repository", in.WorktreePath)
 		}
-		if err := removeWorktree(ctx, branch, false); err != nil {
+		// The session cwd may be the worktree being removed or a worktree
+		// stacked on it; the primary checkout's HEAD is the fallback base.
+		primaryHead, err := headCommit(ctx.PrimaryPath)
+		if err != nil {
+			return err
+		}
+		if err := removeWorktree(ctx, removeBase{PrimaryHead: primaryHead}, branch, false); err != nil {
 			var refusal refusalError
 			if errors.As(err, &refusal) {
 				// Keeping a worktree that still holds work is a valid

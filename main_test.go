@@ -176,6 +176,26 @@ func TestRunRemoveMultipleBestEffort(t *testing.T) {
 	}
 }
 
+func TestRunRemoveMultipleFromInvokingWorktree(t *testing.T) {
+	repo := newTestClone(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "work on a")
+	gitT(t, wtA, "push", "-q", "-u", "origin", "a")
+	wtB := mustResolve(t, reload(t, repo), wtA, "b")
+
+	// Run from worktree a: a passes through its upstream, and b (no
+	// upstream, tip reachable only from the HEAD of a) must still be judged
+	// against the HEAD the command started with, even though removing a
+	// deleted that directory and branch.
+	code, _, stderr := runEda(t, wtA, "", "remove", "a", "b")
+	if code != 0 {
+		t.Fatalf("remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wtA, "a")
+	assertRemoved(t, repo, wtB, "b")
+}
+
 func TestRunRemoveDuplicateBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
@@ -377,6 +397,25 @@ func TestRunHookWorktreeRemoveKeepsUnsafe(t *testing.T) {
 		t.Error("the kept worktree must be reported on stderr")
 	}
 	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveUsesPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "agent-a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "work on a")
+	wtB := mustResolve(t, reload(t, repo), wtA, "agent-b")
+
+	// The session cwd is worktree a, whose HEAD reaches the tip of b; the
+	// hook must judge against the primary HEAD instead and keep b.
+	code, _, stderr := runEda(t, repo, removeHookInput(wtA, wtB), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("keeping a worktree is a success for the hook: exit=%d stderr=%q", code, stderr)
+	}
+	if stderr == "" {
+		t.Error("the kept worktree must be reported on stderr")
+	}
+	assertKept(t, repo, wtB, "agent-b")
 }
 
 func TestRunUnknownCommand(t *testing.T) {
