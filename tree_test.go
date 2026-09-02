@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -152,6 +153,78 @@ func TestRunTreeMergeOfTwoTipsAttachesToNearest(t *testing.T) {
 		"├── feat-a +2\n" +
 		"│   └── feat-c +2\n" +
 		"└── main[primary]* +1\n"
+	if got := runTree(t, repo); got != want {
+		t.Errorf("tree output = %q, want %q", got, want)
+	}
+}
+
+func TestRunTreeCrissCrossPicksSmallestMergeBase(t *testing.T) {
+	// main and feat-a each merge the other's earlier tip, so they have two
+	// equally good merge bases. The one with the smaller object id is the
+	// fork point, whatever order git would report them in.
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "feat-a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "a1")
+	gitT(t, repo, "commit", "-q", "--allow-empty", "-m", "m1")
+	a1 := strings.TrimSpace(gitT(t, wtA, "rev-parse", "HEAD"))
+	m1 := strings.TrimSpace(gitT(t, repo, "rev-parse", "HEAD"))
+	gitT(t, repo, "merge", "-q", "--no-edit", a1)
+	gitT(t, wtA, "merge", "-q", "--no-edit", m1)
+
+	fork := oneline(t, repo, min(a1, m1))
+	want := fork + "\n" +
+		"├── feat-a +2\n" +
+		"└── main[primary]* +2\n"
+	if got := runTree(t, repo); got != want {
+		t.Errorf("tree output = %q, want %q", got, want)
+	}
+}
+
+func TestRunTreeForkCommitsOrderedByCommitTime(t *testing.T) {
+	// Two stacks fork off main at different commits; the fork rows are
+	// ordered by when the fork commit was made, not by object id or by
+	// the order the worktrees were created.
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	stack := func(name, date string) string {
+		t.Setenv("GIT_COMMITTER_DATE", date)
+		wt1 := mustResolve(t, ctx, repo, name+"1")
+		gitT(t, wt1, "commit", "-q", "--allow-empty", "-m", name+"1")
+		fork := oneline(t, wt1, "HEAD")
+		wt2 := mustResolve(t, ctx, wt1, name+"2")
+		gitT(t, wt2, "commit", "-q", "--allow-empty", "-m", name+"2")
+		gitT(t, wt1, "commit", "-q", "--allow-empty", "-m", name+"1 again")
+		return fork
+	}
+	late := stack("y", "2026-01-01T00:00:02Z")
+	early := stack("x", "2026-01-01T00:00:01Z")
+
+	want := "main[primary]*\n" +
+		"├── " + early + " +1\n" +
+		"│   ├── x1 +1\n" +
+		"│   └── x2 +1\n" +
+		"└── " + late + " +1\n" +
+		"    ├── y1 +1\n" +
+		"    └── y2 +1\n"
+	if got := runTree(t, repo); got != want {
+		t.Errorf("tree output = %q, want %q", got, want)
+	}
+}
+
+func TestRunTreePrunableWorktreeListedAfterForest(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "feat-a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "a1")
+	wtB := mustResolve(t, ctx, repo, "feat-b")
+	if err := os.RemoveAll(wtB); err != nil {
+		t.Fatal(err)
+	}
+
+	want := "main[primary]*\n" +
+		"└── feat-a +1\n" +
+		"feat-b[prunable]\n"
 	if got := runTree(t, repo); got != want {
 		t.Errorf("tree output = %q, want %q", got, want)
 	}

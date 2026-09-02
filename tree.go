@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,11 +62,13 @@ type worktreeTree struct {
 }
 
 // buildTree computes the forest. The node set is the distinct worktree
-// tips plus the merge base of every pair of tips; the parent of a node is
-// its nearest ancestor within that set. A node can have several nearest
-// ancestors when it merged two tips (or after a criss-cross merge); the
-// one fewer commits away wins, then the smaller object id, so the display
-// stays deterministic without pretending the history is a tree.
+// tips plus the merge base of every pair of nodes; the parent of a node is
+// its nearest ancestor within that set. Git history is not always a tree:
+// a criss-cross merge leaves several equally good merge bases (the one
+// with the smallest object id is taken), and a node that merged two tips
+// has both as nearest ancestors (the one fewer commits away wins, then
+// the smaller object id). Both rules only decide how a DAG is drawn as a
+// tree, deterministically, without pretending the history is one.
 func buildTree(ctx *repoContext) (*worktreeTree, error) {
 	tr := &worktreeTree{}
 	index := map[string]int{}
@@ -85,43 +88,34 @@ func buildTree(ctx *repoContext) (*worktreeTree, error) {
 		n := node(e.Head)
 		tr.nodes[n].entries = append(tr.nodes[n].entries, i)
 	}
-	tips := len(tr.nodes)
-	for a := 0; a < tips; a++ {
-		for b := a + 1; b < tips; b++ {
-			mb, related, err := mergeBase(ctx.PrimaryPath, tr.nodes[a].commit, tr.nodes[b].commit)
+	// Every pair of nodes is compared once; the merge bases found on the
+	// way join the node set and are compared in turn, so the loop ends
+	// with a set closed under merge-base. The same call tells whether one
+	// node is an ancestor of the other: then it is the only merge base.
+	ancestor := map[[2]int]bool{}
+	for j := 0; j < len(tr.nodes); j++ {
+		for i := 0; i < j; i++ {
+			mb, related, err := mergeBase(ctx.PrimaryPath, tr.nodes[i].commit, tr.nodes[j].commit)
 			if err != nil {
 				return nil, err
 			}
-			if related {
-				node(mb)
-			}
-		}
-	}
-	// ancestor[i][j] reports whether node i is a strict ancestor of node j.
-	n := len(tr.nodes)
-	ancestor := make([][]bool, n)
-	for i := range ancestor {
-		ancestor[i] = make([]bool, n)
-		for j := range ancestor[i] {
-			if i == j {
+			if !related {
 				continue
 			}
-			ok, err := isAncestor(ctx.PrimaryPath, tr.nodes[i].commit, tr.nodes[j].commit)
-			if err != nil {
-				return nil, err
-			}
-			ancestor[i][j] = ok
+			k := node(mb)
+			ancestor[[2]int{i, j}] = k == i
+			ancestor[[2]int{j, i}] = k == j
 		}
 	}
 	for j := range tr.nodes {
 		best := -1
 		for i := range tr.nodes {
-			if !ancestor[i][j] {
+			if !ancestor[[2]int{i, j}] {
 				continue
 			}
 			nearest := true
 			for k := range tr.nodes {
-				if ancestor[i][k] && ancestor[k][j] {
+				if ancestor[[2]int{i, k}] && ancestor[[2]int{k, j}] {
 					nearest = false
 					break
 				}
@@ -155,16 +149,23 @@ func hasCommit(head string) bool {
 	return head != "" && strings.Trim(head, "0") != ""
 }
 
-// mergeBase returns the merge base of two commits. related is false when
-// the two histories share nothing (git merge-base exits 1).
+// mergeBase returns the merge base of two commits. When several are
+// equally good (criss-cross merges) git leaves the choice unspecified, so
+// the one with the smallest object id is taken to keep the result stable.
+// related is false when the two histories share nothing (git merge-base
+// exits 1).
 func mergeBase(dir, a, b string) (mb string, related bool, err error) {
-	out, code, stderrMsg, err := runGitExit(dir, "merge-base", a, b)
+	out, code, stderrMsg, err := runGitExit(dir, "merge-base", "--all", a, b)
 	if err != nil {
 		return "", false, err
 	}
 	switch code {
 	case 0:
-		return strings.TrimSpace(out), true, nil
+		bases := strings.Fields(out)
+		if len(bases) == 0 {
+			return "", false, fmt.Errorf("git merge-base --all %s %s: no output", a, b)
+		}
+		return slices.Min(bases), true, nil
 	case 1:
 		return "", false, nil
 	default:
@@ -172,25 +173,6 @@ func mergeBase(dir, a, b string) (mb string, related bool, err error) {
 			stderrMsg = fmt.Sprintf("exit status %d", code)
 		}
 		return "", false, fmt.Errorf("git merge-base: %s", stderrMsg)
-	}
-}
-
-// isAncestor reports whether commit a is an ancestor of commit b.
-func isAncestor(dir, a, b string) (bool, error) {
-	_, code, stderrMsg, err := runGitExit(dir, "merge-base", "--is-ancestor", a, b)
-	if err != nil {
-		return false, err
-	}
-	switch code {
-	case 0:
-		return true, nil
-	case 1:
-		return false, nil
-	default:
-		if stderrMsg == "" {
-			stderrMsg = fmt.Sprintf("exit status %d", code)
-		}
-		return false, fmt.Errorf("git merge-base --is-ancestor: %s", stderrMsg)
 	}
 }
 
