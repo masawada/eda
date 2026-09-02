@@ -26,6 +26,7 @@ _eda() {
   cmds=(
     'switch:resolve or create the worktree for a branch and move there'
     'list:list worktrees of the current repository'
+    'tree:show where the worktrees diverged from each other'
     'remove:remove worktrees and their branches as pairs'
     'root:move to the primary checkout'
     'status:print current repository, worktree, and branch'
