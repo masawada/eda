@@ -73,7 +73,7 @@ $ git config --global eda.worktreeRoot ~/worktrees
 
 A per-repository value in `.git/config` overrides the global one.
 
-The root is reserved for eda. A worktree under it that has a branch checked out is managed by eda and is removed with `eda remove`, whichever tool created it.
+The root is reserved for eda. A worktree under it that has a branch checked out is managed by eda, whichever tool created it; `eda remove` is the way to delete it.
 
 ## Copying ignored files
 
