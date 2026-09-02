@@ -236,10 +236,12 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 }
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
-// is the session's current directory; it decides the base of new branches so
-// a subagent spawned inside a worktree stacks on that worktree. WorktreeCreate
-// sends name (the slug of the new worktree); WorktreeRemove sends
-// worktree_path (the path the create hook returned) and no name.
+// is the session's current directory. WorktreeCreate sends name (the slug of
+// the new worktree) and uses cwd as the base of the new branch, so a subagent
+// spawned inside a worktree stacks on that worktree. WorktreeRemove sends
+// worktree_path (the path the create hook returned) and no name; it ignores
+// cwd, which follows the session's `cd` and may have left the repository by
+// the time the session ends.
 type hookInput struct {
 	Name         string `json:"name"`
 	Cwd          string `json:"cwd"`
@@ -258,17 +260,17 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 	if err := json.Unmarshal(body, &in); err != nil {
 		return fmt.Errorf("decode hook input: %w", err)
 	}
-	// Fall back to the hook process working directory when cwd is absent;
-	// Claude Code runs hooks in the session directory, so both agree.
-	dir := in.Cwd
-	if dir == "" {
-		dir = cwd
-	}
-
 	switch args[0] {
 	case "worktree-create":
 		if in.Name == "" {
 			return fmt.Errorf("hook input has no worktree name")
+		}
+		// Fall back to the hook process working directory when cwd is
+		// absent; Claude Code runs hooks in the session directory, so both
+		// agree.
+		dir := in.Cwd
+		if dir == "" {
+			dir = cwd
 		}
 		ctx, err := loadRepo(dir)
 		if err != nil {
@@ -280,10 +282,6 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		}
 		return printPath(stdout, wt)
 	case "worktree-remove":
-		ctx, err := loadRepo(dir)
-		if err != nil {
-			return err
-		}
 		if in.WorktreePath == "" {
 			return fmt.Errorf("hook input has no worktree_path")
 		}
@@ -293,6 +291,12 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		if err != nil {
 			return fmt.Errorf("resolve worktree_path %s: %w", in.WorktreePath, err)
 		}
+		// The worktree itself locates its repository; the session cwd may
+		// be in another one by now.
+		ctx, err := loadRepo(resolved)
+		if err != nil {
+			return fmt.Errorf("worktree_path %s: %w", in.WorktreePath, err)
+		}
 		branch := ""
 		for _, e := range ctx.Entries {
 			if e.Path == resolved {
@@ -301,10 +305,11 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 			}
 		}
 		if branch == "" {
-			return fmt.Errorf("worktree_path %s is not a branch worktree of this repository", in.WorktreePath)
+			return fmt.Errorf("worktree_path %s is not a branch worktree", in.WorktreePath)
 		}
-		// The session cwd may be the worktree being removed or a worktree
-		// stacked on it; the primary checkout's HEAD is the fallback base.
+		// The hook has no invoking worktree to take a base from (where it
+		// runs is not where the session started); the primary checkout's
+		// HEAD is the fallback base.
 		primaryHead, err := headCommit(ctx.PrimaryPath)
 		if err != nil {
 			return err
