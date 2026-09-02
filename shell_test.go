@@ -229,6 +229,46 @@ func TestCompletionOmitsOriginHEAD(t *testing.T) {
 	}
 }
 
+// TestCompletionOffersEveryCommand keeps the command candidates of both
+// shells in step with the subcommands usage advertises, minus hook, which
+// is only ever invoked by Claude Code.
+func TestCompletionOffersEveryCommand(t *testing.T) {
+	want := []string{"switch", "list", "tree", "remove", "root", "status", "init"}
+	tests := []struct {
+		shell  string
+		script string
+		run    string
+	}{
+		{"bash", bashScript, "COMP_WORDS=(eda '')\nCOMP_CWORD=1\n_eda\n" + `printf '%s\n' "${COMPREPLY[@]}"`},
+		// _describe needs the completion system loaded, so stub it out to
+		// print the names of the array it is handed.
+		{"zsh", zshScript, "_describe() { print -l -- ${${(P)2}%%:*} }\nwords=(eda '')\nCURRENT=2\n_eda"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.shell, func(t *testing.T) {
+			if _, err := exec.LookPath(tt.shell); err != nil {
+				t.Skipf("%s not available: %v", tt.shell, err)
+			}
+			scriptFile := filepath.Join(t.TempDir(), "integration")
+			if err := os.WriteFile(scriptFile, []byte(tt.script), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			script := "source " + shellQuote(scriptFile) + "\n" + tt.run
+			out, err := exec.Command(tt.shell, "-c", script).CombinedOutput()
+			if err != nil {
+				t.Fatalf("completion run failed: %v\n%s", err, out)
+			}
+			got := strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+			sort.Strings(got)
+			sorted := append([]string(nil), want...)
+			sort.Strings(sorted)
+			if strings.Join(got, "\n") != strings.Join(sorted, "\n") {
+				t.Errorf("command candidates = %q, want %q", got, sorted)
+			}
+		})
+	}
+}
+
 // TestWrappersSurviveNounset ensures plain `eda` under set -u forwards to
 // the binary instead of dying on an unbound $1.
 func TestWrappersSurviveNounset(t *testing.T) {

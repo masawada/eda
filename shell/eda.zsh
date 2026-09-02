@@ -40,6 +40,7 @@ _eda() {
     'remove:remove worktrees and their branches as pairs'
     'root:move to the primary checkout'
     'status:print current repository, worktree, and branch'
+    'init:print the shell integration script (zsh, bash)'
   )
   if (( CURRENT == 2 )); then
     _describe 'eda command' cmds
