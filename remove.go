@@ -176,7 +176,9 @@ func upstreamBase(dir, branch string) (rev, desc string, err error) {
 	if err != nil {
 		return "", "", err
 	}
-	upstream := strings.TrimSpace(out)
+	// Only the terminating newline is git's; a ref name may end in bytes
+	// TrimSpace would strip.
+	upstream := strings.TrimSuffix(out, "\n")
 	if upstream == "" {
 		return "", "", nil
 	}
