@@ -65,7 +65,8 @@ func refExists(dir, ref string) (bool, error) {
 		return false, nil
 	default:
 		// Anything else (corrupt refs, permissions, ...) must not be read
-		// as absence: the gone-upstream deletion path would fail open.
+		// as absence: removal would silently judge against the fallback
+		// HEAD instead of the upstream.
 		return false, fmt.Errorf("git show-ref %s: exit status %d: %s", ref, code, stderrMsg)
 	}
 }

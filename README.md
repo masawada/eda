@@ -35,7 +35,7 @@ $ eda status              # print current repository, worktree, and branch
 
 `eda switch` resolves in order: an existing worktree, an existing local branch, a remote branch on `origin` (a tracking branch is created), and finally a new branch based on the HEAD of the directory you run it in — so switching from inside a worktree stacks the new branch on top of it, like `git switch -c`.
 
-`eda remove` deletes the worktree and its branch together, and only when nothing would be lost: the worktree must be clean, and the branch must either have no commits unreachable from other refs, or have a gone upstream (the state `git fetch --prune` leaves after the remote branch was deleted, e.g. by a squash merge). A pushed branch that is still under review is protected. Use `--force` to override. With several branches each one is removed independently: a refused branch does not stop the rest, and the command fails if any branch failed.
+`eda remove` deletes the worktree and its branch together. Without `--force`, the worktree must be clean and the branch tip must be reachable from its upstream. When no upstream ref can be resolved, the HEAD of the directory you run it in is used instead; removing the worktree you are in uses the HEAD of the primary checkout. Ignored files do not count as changes. With several branches each one is removed independently: a refused branch does not stop the rest, and the command fails if any branch failed.
 
 ## Divergence tree
 
@@ -94,7 +94,7 @@ Configure the worktree hooks in `~/.claude/settings.json` so that worktrees Clau
 }
 ```
 
-The create hook has exactly the same semantics as `eda switch`, with the session's current directory as the base: a subagent spawned inside a worktree stacks on that worktree. The remove hook receives the path of that worktree and removes the worktree and its branch together, but only when nothing would be lost; otherwise it leaves both in place. Claude Code ignores the hook's result, so a kept worktree shows up only in Claude Code's debug log and in `eda list`.
+The create hook has exactly the same semantics as `eda switch`, with the session's current directory as the base: a subagent spawned inside a worktree stacks on that worktree. The remove hook receives the path of that worktree and removes the worktree and its branch together under the same conditions as `eda remove`, with the HEAD of the primary checkout as the fallback; when they are not met it leaves both in place. Claude Code ignores the hook's result, so a kept worktree shows up only in Claude Code's debug log and in `eda list`.
 
 ## Development
 
