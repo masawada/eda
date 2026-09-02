@@ -20,7 +20,8 @@ func refusalf(format string, a ...any) error {
 }
 
 // managedWorktree reports whether the path lives under eda's worktree
-// root. eda only deletes worktrees it placed; anything else belongs to
+// root. The root is reserved for eda, so a worktree under it is eda's to
+// delete whichever tool created it; anything outside belongs to
 // `git worktree remove`.
 func managedWorktree(ctx *repoContext, path string) bool {
 	return strings.HasPrefix(path, ctx.WorktreeRoot+string(filepath.Separator))
