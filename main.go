@@ -225,7 +225,7 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 		return err
 	}
 	_, err = fmt.Fprintf(stdout, "primary  %s\nworktree %s\nbranch   %s\n",
-		ctx.PrimaryPath, strings.TrimSpace(top), strings.TrimSpace(branch))
+		ctx.PrimaryPath, strings.TrimSuffix(top, "\n"), strings.TrimSuffix(branch, "\n"))
 	return err
 }
 

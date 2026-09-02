@@ -258,6 +258,26 @@ func TestRunStatus(t *testing.T) {
 	}
 }
 
+// TestRunStatusKeepsPathEndingInSpace guards the worktree line against
+// whitespace trimming: `git rev-parse --show-toplevel` ends in a newline,
+// and trimming more than that silently drops a trailing space of the path.
+func TestRunStatusKeepsPathEndingInSpace(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo ")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTestRepoAt(t, dir)
+	loadRepoWithRoot(t, repo)
+
+	code, stdout, _ := runEda(t, repo, "", "status")
+	if code != 0 {
+		t.Fatalf("status: exit = %d", code)
+	}
+	if want := "worktree " + repo + "\n"; !strings.Contains(stdout, want) {
+		t.Errorf("status output missing %q, got %q", want, stdout)
+	}
+}
+
 func TestRunHookWorktreeCreate(t *testing.T) {
 	repo := newTestRepo(t)
 	_, root := loadRepoWithRoot(t, repo)
