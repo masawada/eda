@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -307,6 +308,41 @@ func TestRunHookWorktreeRemoveKeepsUnsafe(t *testing.T) {
 	assertKept(t, repo, wt, "agent-abc")
 }
 
+func TestRunVersion(t *testing.T) {
+	code, stdout, stderr := runEda(t, t.TempDir(), "", "version")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0; stderr = %q", code, stderr)
+	}
+	if want := "eda version " + version + "\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}
+
+func TestRunVersionRejectsArguments(t *testing.T) {
+	code, stdout, stderr := runEda(t, t.TempDir(), "", "version", "extra")
+	if code == 0 {
+		t.Error("version with an argument must fail")
+	}
+	if stdout != "" {
+		t.Errorf("stdout must stay empty on error, got %q", stdout)
+	}
+	if !strings.Contains(stderr, "usage") {
+		t.Errorf("stderr must include usage, got %q", stderr)
+	}
+}
+
+// tagpr rewrites the version constant in the release pull request and reads
+// it back at merge time to decide the tag. It writes the bare x.y.z form, so
+// a leading "v" would desynchronise file and tag. Leading zeros do the same
+// more quietly: tagpr normalises "01.2.3" to the tag v1.2.3 while the binary
+// keeps reporting 01.2.3.
+func TestVersionIsBareSemver(t *testing.T) {
+	bareSemver := regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$`)
+	if !bareSemver.MatchString(version) {
+		t.Errorf("version = %q, want bare semver without a leading v or leading zeros", version)
+	}
+}
+
 func TestRunUnknownCommand(t *testing.T) {
 	repo := newTestRepo(t)
 	code, _, stderr := runEda(t, repo, "", "bogus")
@@ -360,6 +396,13 @@ func TestRunInitFailsOnBrokenStdout(t *testing.T) {
 	var stderr strings.Builder
 	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"init", "-", "zsh"}, repo); code == 0 {
 		t.Error("a failed script write must fail the command, not report success")
+	}
+}
+
+func TestRunVersionFailsOnBrokenStdout(t *testing.T) {
+	var stderr strings.Builder
+	if code := run(strings.NewReader(""), failWriter{}, &stderr, []string{"version"}, t.TempDir()); code == 0 {
+		t.Error("a failed version write must fail the command, not report success")
 	}
 }
 

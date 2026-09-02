@@ -27,6 +27,7 @@ $ eda tree                # show where the worktrees diverged from each other
 $ eda remove <branch>...  # remove worktrees and their branches as pairs
 $ eda root                # move back to the primary checkout
 $ eda status              # print current repository, worktree, and branch
+$ eda version             # print the version of eda
 ```
 
 `eda switch` resolves in order: an existing worktree, an existing local branch, a remote branch on `origin` (a tracking branch is created), and finally a new branch based on the HEAD of the directory you run it in — so switching from inside a worktree stacks the new branch on top of it, like `git switch -c`.
