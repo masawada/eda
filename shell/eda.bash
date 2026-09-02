@@ -35,10 +35,15 @@ _eda() {
       # candidates literally instead, and shell-quote them on the way out:
       # bash inserts them on the command line verbatim, where an unquoted
       # $(...) would run on Enter.
-      local ref quoted
+      #
+      # The word being completed may carry escapes from an earlier round:
+      # bash inserts the common prefix of the quoted candidates, so after
+      # `x-\$foo` and `x-\;bar` it reads `x-\`. Drop the backslashes before
+      # matching; ref names cannot contain one, so nothing else is lost.
+      local ref quoted plain=${cur//\\/}
       while IFS= read -r ref; do
         [[ $ref == HEAD ]] && continue
-        [[ $ref == "$cur"* ]] || continue
+        [[ $ref == "$plain"* ]] || continue
         printf -v quoted '%q' "$ref"
         COMPREPLY+=("$quoted")
       done < <(

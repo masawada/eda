@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -110,6 +111,33 @@ func TestBashCompletionQuotesRefNames(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("inserting the completion executed code embedded in a ref name (marker %s exists)", marker)
+	}
+}
+
+// TestBashCompletionMatchesEscapedPrefix covers the second Tab: when several
+// quoted candidates share a prefix, bash inserts that prefix, escapes
+// included (`x-\` for `x-\$foo` and `x-\;bar`), so the next completion runs
+// with an escaped word and must still match the literal names.
+func TestBashCompletionMatchesEscapedPrefix(t *testing.T) {
+	repo := newTestRepo(t)
+	gitT(t, repo, "branch", "x-$foo")
+	gitT(t, repo, "branch", "x-;bar")
+
+	for _, cur := range []string{`x-\`, `x-\$`, `x-\$f`} {
+		var got []string
+		for _, entry := range bashCompletion(t, repo, cur) {
+			if entry != "" {
+				got = append(got, bashEval(t, entry))
+			}
+		}
+		want := []string{"x-$foo", "x-;bar"}
+		if strings.HasPrefix(cur, `x-\$`) {
+			want = []string{"x-$foo"}
+		}
+		sort.Strings(got)
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Errorf("completion for %q = %q, want %q", cur, got, want)
+		}
 	}
 }
 
