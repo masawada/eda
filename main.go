@@ -35,9 +35,10 @@ func main() {
 	os.Exit(run(os.Stdin, os.Stdout, os.Stderr, os.Args[1:], cwd))
 }
 
-// run dispatches subcommands. Commands that print a path emit exactly one
-// absolute path line on stdout and nothing else; all diagnostics go to
-// stderr. Shell integration and the Claude Code hooks rely on this contract.
+// run dispatches subcommands. Commands that print a path write the absolute
+// path bytes followed by a single newline on stdout and nothing else; all
+// diagnostics go to stderr. Shell integration and the Claude Code hooks rely
+// on this contract.
 func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(stderr, usage)
@@ -80,9 +81,10 @@ func singleBranchArg(cmd string, args []string) (string, error) {
 	return args[0], nil
 }
 
-// printPath writes the single path line that shell integration and the
-// hooks consume. A write failure must fail the command: reporting success
-// with a missing or partial path would break the stdout contract.
+// printPath writes the path bytes followed by a newline, the output that
+// shell integration and the hooks consume. A write failure must fail the
+// command: reporting success with a missing or partial path would break the
+// stdout contract.
 func printPath(w io.Writer, path string) error {
 	if _, err := fmt.Fprintln(w, path); err != nil {
 		return fmt.Errorf("write path: %w", err)
