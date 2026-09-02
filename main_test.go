@@ -343,9 +343,15 @@ func TestRunHookWorktreeRemoveUnknownPath(t *testing.T) {
 	ctx, _ := loadRepoWithRoot(t, repo)
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 
-	// An existing directory that is not a worktree, and one that does not
-	// exist at all, must both fail without touching anything.
-	for _, unknown := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing")} {
+	// An existing directory that is not a worktree, one that does not exist
+	// at all, and a directory inside the worktree (which locates the
+	// repository but is not the worktree itself) must all fail without
+	// touching anything.
+	sub := filepath.Join(wt, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, unknown := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing"), sub} {
 		code, _, stderr := runEda(t, repo, removeHookInput(repo, unknown), "hook", "worktree-remove")
 		if code != 1 {
 			t.Fatalf("unknown worktree_path %q: exit=%d, want 1 (stderr=%q)", unknown, code, stderr)
