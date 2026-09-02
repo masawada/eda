@@ -441,6 +441,38 @@ func TestRunHookWorktreeRemoveUsesPrimaryHead(t *testing.T) {
 	assertKept(t, repo, wtB, "agent-b")
 }
 
+func TestRunHookWorktreeRemoveFromOtherDirectory(t *testing.T) {
+	// The session cwd follows `cd`, so by the time the session ends it may
+	// be in another repository or outside any; worktree_path alone must
+	// identify the worktree. The hook process cwd is outside as well.
+	for name, cwd := range map[string]string{"other repository": newTestRepo(t), "no repository": t.TempDir()} {
+		t.Run(name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			ctx, _ := loadRepoWithRoot(t, repo)
+			wt := mustResolve(t, ctx, repo, "agent-abc")
+
+			code, _, stderr := runEda(t, cwd, removeHookInput(cwd, wt), "hook", "worktree-remove")
+			if code != 0 {
+				t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+			}
+			assertRemoved(t, repo, wt, "agent-abc")
+		})
+	}
+}
+
+func TestRunHookWorktreeRemoveWithoutCwd(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	stdin := `{"session_id":"s","hook_event_name":"WorktreeRemove","worktree_path":` + jsonString(wt) + `}`
+	code, _, stderr := runEda(t, t.TempDir(), stdin, "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove without cwd: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
+}
+
 func TestRunUnknownCommand(t *testing.T) {
 	repo := newTestRepo(t)
 	code, _, stderr := runEda(t, repo, "", "bogus")
