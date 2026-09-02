@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 )
@@ -230,14 +231,13 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
 // is the session's current directory; it decides the base of new branches so
-// a subagent spawned inside a worktree stacks on that worktree. The path
-// field is speculative for WorktreeRemove, whose real schema could not be
-// observed in the step0 spike (the hook never fired for hook-created
-// worktrees).
+// a subagent spawned inside a worktree stacks on that worktree. WorktreeCreate
+// sends name (the slug of the new worktree); WorktreeRemove sends
+// worktree_path (the path the create hook returned) and no name.
 type hookInput struct {
-	Name string `json:"name"`
-	Cwd  string `json:"cwd"`
-	Path string `json:"path"`
+	Name         string `json:"name"`
+	Cwd          string `json:"cwd"`
+	WorktreePath string `json:"worktree_path"`
 }
 
 func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) error {
@@ -253,7 +253,7 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		return fmt.Errorf("decode hook input: %w", err)
 	}
 	// Fall back to the hook process working directory when cwd is absent;
-	// both were observed to be the session directory in the step0 spike.
+	// Claude Code runs hooks in the session directory, so both agree.
 	dir := in.Cwd
 	if dir == "" {
 		dir = cwd
@@ -278,17 +278,24 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		if err != nil {
 			return err
 		}
-		branch := in.Name
-		if branch == "" && in.Path != "" {
-			for _, e := range ctx.Entries {
-				if e.Path == in.Path {
-					branch = e.Branch
-					break
-				}
+		if in.WorktreePath == "" {
+			return fmt.Errorf("hook input has no worktree_path")
+		}
+		// Entries hold the realpaths git recorded; resolve the input the
+		// same way so a symlinked path still matches.
+		resolved, err := filepath.EvalSymlinks(in.WorktreePath)
+		if err != nil {
+			return fmt.Errorf("resolve worktree_path %s: %w", in.WorktreePath, err)
+		}
+		branch := ""
+		for _, e := range ctx.Entries {
+			if e.Path == resolved {
+				branch = e.Branch
+				break
 			}
 		}
 		if branch == "" {
-			return fmt.Errorf("hook input identifies no worktree (name and path are empty or unknown)")
+			return fmt.Errorf("worktree_path %s is not a branch worktree of this repository", in.WorktreePath)
 		}
 		if err := removeWorktree(ctx, branch, false); err != nil {
 			var refusal refusalError

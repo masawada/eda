@@ -277,15 +277,54 @@ func TestRunHookWorktreeCreate(t *testing.T) {
 	}
 }
 
+// removeHookInput builds the WorktreeRemove payload: the common fields plus
+// worktree_path, the path the create hook returned. There is no name field.
+func removeHookInput(cwd, worktreePath string) string {
+	return `{"session_id":"s","cwd":` + jsonString(cwd) + `,"hook_event_name":"WorktreeRemove","worktree_path":` + jsonString(worktreePath) + `}`
+}
+
 func TestRunHookWorktreeRemove(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
-	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
 	if code != 0 {
 		t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveUnknownPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	unknown := filepath.Join(t.TempDir(), "elsewhere")
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, unknown), "hook", "worktree-remove")
+	if code != 1 {
+		t.Fatalf("unknown worktree_path: exit=%d, want 1 (stderr=%q)", code, stderr)
+	}
+	if !strings.Contains(stderr, unknown) {
+		t.Errorf("stderr must name the path, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveSymlinkedPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	// git records realpaths; a path reaching the worktree through a symlink
+	// must still identify it.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(wt), link); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, filepath.Join(link, filepath.Base(wt))), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove via symlink: exit=%d stderr=%q", code, stderr)
 	}
 	assertRemoved(t, repo, wt, "agent-abc")
 }
@@ -296,8 +335,7 @@ func TestRunHookWorktreeRemoveKeepsUnsafe(t *testing.T) {
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
-	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
 	if code != 0 {
 		t.Fatalf("keeping a worktree is a success for the hook: exit=%d", code)
 	}
@@ -369,9 +407,8 @@ func TestRunHookWorktreeRemoveKeptReportFails(t *testing.T) {
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
 	var stdout strings.Builder
-	if code := run(strings.NewReader(stdin), &stdout, failWriter{}, []string{"hook", "worktree-remove"}, repo); code == 0 {
+	if code := run(strings.NewReader(removeHookInput(repo, wt)), &stdout, failWriter{}, []string{"hook", "worktree-remove"}, repo); code == 0 {
 		t.Error("an undeliverable kept-report must fail the hook, not report success")
 	}
 	assertKept(t, repo, wt, "agent-abc")
