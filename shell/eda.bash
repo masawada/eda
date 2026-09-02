@@ -42,9 +42,11 @@ _eda() {
         printf -v quoted '%q' "$ref"
         COMPREPLY+=("$quoted")
       done < <(
+        # strip= rather than :short so origin/HEAD comes out as HEAD (its
+        # short form is a bare "origin") and gets dropped above.
         {
-          git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null
-          git for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null | sed 's|^origin/||'
+          git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null
+          git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>/dev/null
         } | sort -u
       )
       ;;

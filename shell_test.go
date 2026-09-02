@@ -110,6 +110,62 @@ func TestBashCompletionQuotesRefNames(t *testing.T) {
 	}
 }
 
+// zshBranches runs the _eda_branches helper from the zsh script in repo and
+// returns the candidates it prints, one per line.
+func zshBranches(t *testing.T, repo string) []string {
+	t.Helper()
+	if _, err := exec.LookPath("zsh"); err != nil {
+		t.Skipf("zsh not available: %v", err)
+	}
+	scriptFile := filepath.Join(t.TempDir(), "eda.zsh")
+	if err := os.WriteFile(scriptFile, []byte(zshScript), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := "source " + shellQuote(scriptFile) + "\n" +
+		"cd " + shellQuote(repo) + "\n" +
+		"_eda_branches"
+	out, err := exec.Command("zsh", "-c", script).CombinedOutput()
+	if err != nil {
+		t.Fatalf("completion run failed: %v\n%s", err, out)
+	}
+	return strings.Split(strings.TrimSuffix(string(out), "\n"), "\n")
+}
+
+// TestCompletionOmitsOriginHEAD ensures a clone's refs/remotes/origin/HEAD
+// does not surface as a bogus `origin` candidate: git shortens it to plain
+// `origin`, which a `origin/` prefix strip leaves untouched.
+func TestCompletionOmitsOriginHEAD(t *testing.T) {
+	origin := newTestRepo(t)
+	clone := filepath.Join(t.TempDir(), "clone")
+	gitT(t, origin, "clone", "-q", origin, clone)
+	if got := strings.TrimSpace(gitT(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD")); got != "refs/remotes/origin/main" {
+		t.Fatalf("origin/HEAD = %q, want refs/remotes/origin/main", got)
+	}
+
+	tests := []struct {
+		shell      string
+		candidates func(t *testing.T) []string
+	}{
+		{"bash", func(t *testing.T) []string { return bashCompletion(t, clone, "") }},
+		{"zsh", func(t *testing.T) []string { return zshBranches(t, clone) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.shell, func(t *testing.T) {
+			entries := tt.candidates(t)
+			seen := map[string]bool{}
+			for _, entry := range entries {
+				seen[entry] = true
+			}
+			if seen["origin"] {
+				t.Errorf("completion must not offer origin, got:\n%s", strings.Join(entries, "\n"))
+			}
+			if !seen["main"] {
+				t.Errorf("completion must offer main, got:\n%s", strings.Join(entries, "\n"))
+			}
+		})
+	}
+}
+
 // TestWrappersSurviveNounset ensures plain `eda` under set -u forwards to
 // the binary instead of dying on an unbound $1.
 func TestWrappersSurviveNounset(t *testing.T) {
