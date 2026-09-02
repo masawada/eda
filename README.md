@@ -75,7 +75,7 @@ A per-repository value in `.git/config` overrides the global one.
 
 ## Copying ignored files
 
-To carry gitignored files such as `.env` into every new worktree, list them in a `.worktreeinclude` file at the repository root (same name and gitignore syntax as Claude Code's native feature). Only files that match a pattern and are also gitignored are copied.
+To carry gitignored files such as `.env` into every new worktree, list them in a `.worktreeinclude` file at the repository root (same name and gitignore syntax as Claude Code's native feature). Only files that match a pattern and are also gitignored are copied. Symbolic links are skipped, never followed.
 
 ## Claude Code integration
 

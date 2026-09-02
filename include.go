@@ -11,7 +11,8 @@ import (
 // copyWorktreeInclude copies files from src into dst according to the
 // .worktreeinclude file at the root of src. The file uses .gitignore syntax,
 // and only files that both match a pattern and are gitignored are copied, so
-// tracked files are never duplicated. This mirrors Claude Code's native
+// tracked files are never duplicated. Only regular files are copied; symbolic
+// links are skipped rather than followed. This mirrors Claude Code's native
 // .worktreeinclude, which is not processed when a WorktreeCreate hook is
 // configured, and it also serves worktrees humans create with `eda switch`.
 func copyWorktreeInclude(src, dst string) error {
@@ -113,7 +114,9 @@ func lsFiles(dir string, opts ...string) ([]string, error) {
 }
 
 func copyFile(src, dst string) error {
-	info, err := os.Stat(src)
+	// Lstat so that symlinks are seen as such and skipped: the copy never
+	// follows a link, and a dangling one cannot fail the whole copy.
+	info, err := os.Lstat(src)
 	if err != nil {
 		return err
 	}
