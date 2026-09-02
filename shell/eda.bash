@@ -25,7 +25,7 @@ _eda() {
   local cur=${COMP_WORDS[COMP_CWORD]}
   COMPREPLY=()
   if [[ $COMP_CWORD -eq 1 ]]; then
-    COMPREPLY=($(compgen -W "switch list remove root status init" -- "$cur"))
+    COMPREPLY=($(compgen -W "switch list tree remove root status init" -- "$cur"))
     return
   fi
   case "${COMP_WORDS[1]}" in

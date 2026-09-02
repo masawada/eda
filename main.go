@@ -16,6 +16,7 @@ const usage = `usage: eda <command> [arguments]
 commands:
   switch <branch>               resolve or create the worktree for a branch and print its path
   list                          list worktrees of the current repository
+  tree                          show where the worktrees diverged from each other
   remove [--force] <branch>...  remove worktrees and their branches as pairs
   root                          print the primary checkout path
   status                        print current repository, worktree, and branch
@@ -48,6 +49,8 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) i
 		err = cmdSwitch(stdout, rest, cwd)
 	case "list":
 		err = cmdList(stdout, rest, cwd)
+	case "tree":
+		err = cmdTree(stdout, rest, cwd)
 	case "remove":
 		err = cmdRemove(stderr, rest, cwd)
 	case "root":
