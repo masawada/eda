@@ -174,6 +174,157 @@ func TestResolveWorktreeRollsBackOnCopyFailure(t *testing.T) {
 	}
 }
 
+// installPostCheckoutHook points core.hooksPath of the repo at a directory
+// holding a post-checkout hook with the given shell body. `git worktree add`
+// runs the hook after the worktree and branch exist, so a failing hook is
+// how git leaves a half-initialized worktree behind.
+func installPostCheckoutHook(t *testing.T, repo, body string) {
+	t.Helper()
+	hooks := t.TempDir()
+	hook := filepath.Join(hooks, "post-checkout")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitT(t, repo, "config", "core.hooksPath", hooks)
+}
+
+// assertNothingCreated checks that neither a worktree for the branch nor
+// any directory under the repo's worktree base survived a rollback.
+func assertNothingCreated(t *testing.T, root, repo, branch string) {
+	t.Helper()
+	for _, e := range reload(t, repo).Entries {
+		if e.Branch == branch {
+			t.Errorf("worktree registration for %q must be rolled back, found %s", branch, e.Path)
+		}
+	}
+	left, err := os.ReadDir(worktreeBase(root, repo))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if len(left) > 0 {
+		t.Errorf("worktree base must be empty after rollback, found %v", left)
+	}
+}
+
+func TestResolveWorktreeRollsBackFailedAddKeepingExistingBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	gitT(t, repo, "branch", "topic")
+	installPostCheckoutHook(t, repo, "exit 1\n")
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	if _, err := resolveWorktree(ctx, repo, "topic"); err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	assertNothingCreated(t, root, repo, "topic")
+	if ok, _ := localBranchExists(repo, "topic"); !ok {
+		t.Error("a pre-existing branch must never be deleted by the rollback")
+	}
+}
+
+func TestResolveWorktreeRollsBackFailedAddOfTrackingBranch(t *testing.T) {
+	origin := newTestRepo(t)
+	// Dots and slashes in the name exercise the config section removal.
+	const branch = "release/v1.2"
+	gitT(t, origin, "branch", branch)
+	repo := filepath.Join(t.TempDir(), "clone")
+	gitT(t, origin, "clone", "-q", origin, repo)
+	repo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	installPostCheckoutHook(t, repo, "exit 1\n")
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	if _, err := resolveWorktree(ctx, repo, branch); err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	assertNothingCreated(t, root, repo, branch)
+	if ok, _ := localBranchExists(repo, branch); ok {
+		t.Error("the branch created by this call must be rolled back")
+	}
+	for _, key := range []string{"remote", "merge"} {
+		_, code, _, err := runGitExit(repo, "config", "--get", "branch."+branch+"."+key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code != 1 {
+			t.Errorf("branch.%s.%s must be removed with the branch, git config exit = %d", branch, key, code)
+		}
+	}
+}
+
+func TestResolveWorktreeRollsBackFailedAddOfNewBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	installPostCheckoutHook(t, repo, "exit 1\n")
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	if _, err := resolveWorktree(ctx, repo, "feature-x"); err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	assertNothingCreated(t, root, repo, "feature-x")
+	if ok, _ := localBranchExists(repo, "feature-x"); ok {
+		t.Error("the branch created by this call must be rolled back")
+	}
+}
+
+func TestResolveWorktreeKeepsBranchMovedByHook(t *testing.T) {
+	repo := newTestRepo(t)
+	base, err := headCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The hook runs inside the new worktree: commit on the branch, then fail.
+	installPostCheckoutHook(t, repo, "git commit -q --allow-empty -m hook || exit 2\nexit 1\n")
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	_, err = resolveWorktree(ctx, repo, "feature-x")
+	if err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	assertNothingCreated(t, root, repo, "feature-x")
+	tip := strings.TrimSpace(gitT(t, repo, "rev-parse", "--verify", "refs/heads/feature-x"))
+	if tip == base {
+		t.Fatal("test setup: the hook must have moved the branch")
+	}
+	if !strings.Contains(err.Error(), `"feature-x"`) {
+		t.Errorf("error must name the branch that was kept: %v", err)
+	}
+}
+
+func TestResolveWorktreeReportsConfigCleanupFailure(t *testing.T) {
+	origin := newTestRepo(t)
+	gitT(t, origin, "branch", "remote-only")
+	repo := filepath.Join(t.TempDir(), "clone")
+	gitT(t, origin, "clone", "-q", origin, repo)
+	repo, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A stale config lock makes every later config write fail, while the
+	// ref and worktree rollback are unaffected. The hook runs after the
+	// tracking configuration was written, so `worktree add` itself gets
+	// through.
+	lock := filepath.Join(repo, ".git", "config.lock")
+	installPostCheckoutHook(t, repo, "touch '"+lock+"'\nexit 1\n")
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	_, err = resolveWorktree(ctx, repo, "remote-only")
+	if err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	assertNothingCreated(t, root, repo, "remote-only")
+	if ok, _ := localBranchExists(repo, "remote-only"); ok {
+		t.Error("the branch created by this call must be rolled back")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "git worktree add") {
+		t.Errorf("error must carry the original worktree add failure: %v", err)
+	}
+	if !strings.Contains(msg, "branch config cleanup failed") {
+		t.Errorf("error must report the config cleanup failure separately: %v", err)
+	}
+}
+
 func TestResolveWorktreeInvalidName(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
