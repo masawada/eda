@@ -121,50 +121,71 @@ func failedWorktreeAdd(ctx *repoContext, dir, branch, baseOID string, addErr err
 }
 
 // rollbackWorktreeAdd undoes a worktree creation for branch at dir: the
-// worktree is removed when git still lists it for that branch, and when
-// baseOID is non-empty (the branch was created by this call) the branch is
-// deleted together with its branch.<name> config section, the same cleanup
-// `git branch -D` does. It returns a description of what is left for the
-// user to clean up, or "" when the rollback is complete.
+// worktree is removed when git still lists it there for that branch, and
+// when baseOID is non-empty (the add was asked to create the branch) the
+// branch is deleted together with its branch.<name> config section, the
+// same cleanup `git branch -D` does. It returns a description of what is
+// left for the user to clean up, or "" when the rollback is complete.
 //
-// A hook ran between creation and rollback, so the branch is only deleted
-// while its tip still equals baseOID: `update-ref -d` with the expected
-// value refuses to discard commits the hook made on it. A branch that
-// existed before this call is never deleted.
+// The branch is only deleted when the worktree at dir was registered for
+// it: `worktree add -b` refuses an existing branch before it creates the
+// worktree, so that registration proves this call created the branch. A
+// branch that exists without the worktree may be the work of a concurrent
+// switch and is left alone. A hook ran between creation and rollback, so
+// the branch is also kept when its tip no longer equals baseOID or it has
+// become a symbolic ref; `update-ref -d` with the expected value refuses to
+// discard commits the hook made on it in between.
 func rollbackWorktreeAdd(ctx *repoContext, dir, branch, baseOID string) string {
 	out, err := runGit(ctx.PrimaryPath, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
-		return fmt.Sprintf("rollback failed, remove the worktree and branch manually: %v", err)
+		return fmt.Sprintf("rollback failed, clean up manually: %v", err)
 	}
+	var registered *worktreeEntry
 	for _, e := range parseWorktrees(out) {
-		if e.Path == dir && e.Branch == branch {
-			if _, err := runGit(ctx.PrimaryPath, "worktree", "remove", "--force", dir); err != nil {
-				return fmt.Sprintf("rollback failed, remove it manually: %v", err)
-			}
+		if e.Path == dir {
+			registered = &e
 			break
 		}
+	}
+	if registered == nil {
+		return ""
+	}
+	if registered.Branch != branch {
+		return fmt.Sprintf("worktree %s no longer checks out %q and was left in place", dir, branch)
+	}
+	if _, err := runGit(ctx.PrimaryPath, "worktree", "remove", "--force", dir); err != nil {
+		return fmt.Sprintf("rollback failed, remove it manually: %v", err)
 	}
 	if baseOID == "" {
 		return ""
 	}
 
 	ref := "refs/heads/" + branch
-	out, code, stderrMsg, err := runGitExit(ctx.PrimaryPath, "rev-parse", "--verify", "--quiet", ref)
+	_, code, stderrMsg, err := runGitExit(ctx.PrimaryPath, "symbolic-ref", "-q", ref)
 	switch {
 	case err != nil:
 		return fmt.Sprintf("branch rollback failed, delete it manually: %v", err)
-	case code == 1:
-		// The branch is already gone.
-		return ""
-	case code != 0:
+	case code == 0:
+		return fmt.Sprintf("branch %q was modified after creation and was kept", branch)
+	case code != 1:
+		return fmt.Sprintf("branch rollback failed, delete it manually: git symbolic-ref %s: exit status %d: %s", ref, code, stderrMsg)
+	}
+	out, code, stderrMsg, err = runGitExit(ctx.PrimaryPath, "rev-parse", "--verify", "--quiet", ref)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("branch rollback failed, delete it manually: %v", err)
+	case code == 0:
+		if strings.TrimSpace(out) != baseOID {
+			return fmt.Sprintf("branch %q was modified after creation and was kept", branch)
+		}
+		if _, err := runGit(ctx.PrimaryPath, "update-ref", "--no-deref", "-d", ref, baseOID); err != nil {
+			return fmt.Sprintf("branch rollback failed, delete it manually: %v", err)
+		}
+	case code != 1:
 		return fmt.Sprintf("branch rollback failed, delete it manually: git rev-parse %s: exit status %d: %s", ref, code, stderrMsg)
 	}
-	if strings.TrimSpace(out) != baseOID {
-		return fmt.Sprintf("branch %q was modified after creation and is kept; delete it manually", branch)
-	}
-	if _, err := runGit(ctx.PrimaryPath, "update-ref", "-d", ref, baseOID); err != nil {
-		return fmt.Sprintf("branch rollback failed, delete it manually: %v", err)
-	}
+	// The config section is cleaned up even when the ref is already gone:
+	// it was written for the branch this call created.
 	if err := removeBranchConfig(ctx.PrimaryPath, branch); err != nil {
 		return fmt.Sprintf("branch config cleanup failed, remove the config section of branch %q manually: %v", branch, err)
 	}

@@ -291,6 +291,52 @@ func TestResolveWorktreeKeepsBranchMovedByHook(t *testing.T) {
 	}
 }
 
+// A hook can turn the created ref into a symbolic ref pointing at another
+// branch at the same commit; a dereferencing delete would then remove that
+// other branch instead. git reports the worktree as checking out the
+// target, so the worktree no longer matches the branch either and is
+// reported instead of removed.
+func TestResolveWorktreeKeepsRefTurnedSymbolicByHook(t *testing.T) {
+	repo := newTestRepo(t)
+	installPostCheckoutHook(t, repo, "git symbolic-ref refs/heads/feature-x refs/heads/main || exit 2\nexit 1\n")
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	_, err := resolveWorktree(ctx, repo, "feature-x")
+	if err == nil {
+		t.Fatal("a failing post-checkout hook must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "left in place") {
+		t.Errorf("a worktree that no longer checks out the branch must be reported: %v", err)
+	}
+	if ok, _ := localBranchExists(repo, "main"); !ok {
+		t.Error("the branch the symbolic ref points at must not be deleted")
+	}
+	if _, code, _, _ := runGitExit(repo, "symbolic-ref", "-q", "refs/heads/feature-x"); code != 0 {
+		t.Error("a ref that no longer is the created branch must be kept")
+	}
+}
+
+// When `worktree add -b` fails before registering the worktree, the branch
+// cannot be attributed to this call: another switch may have created it
+// at the same base in the meantime, so it must be left alone.
+func TestRollbackWorktreeAddKeepsBranchWithoutWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	gitT(t, repo, "branch", "topic")
+	base, err := headCommit(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, root := loadRepoWithRoot(t, repo)
+
+	dir := filepath.Join(worktreeBase(root, repo), "deadbeef")
+	if left := rollbackWorktreeAdd(ctx, dir, "topic", base); left != "" {
+		t.Errorf("nothing to roll back must not be reported as incomplete: %s", left)
+	}
+	if ok, _ := localBranchExists(repo, "topic"); !ok {
+		t.Error("a branch without a worktree at the candidate path must be kept")
+	}
+}
+
 func TestResolveWorktreeReportsConfigCleanupFailure(t *testing.T) {
 	origin := newTestRepo(t)
 	gitT(t, origin, "branch", "remote-only")
