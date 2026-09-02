@@ -300,15 +300,49 @@ func TestRunHookWorktreeRemoveUnknownPath(t *testing.T) {
 	ctx, _ := loadRepoWithRoot(t, repo)
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 
-	unknown := filepath.Join(t.TempDir(), "elsewhere")
-	code, _, stderr := runEda(t, repo, removeHookInput(repo, unknown), "hook", "worktree-remove")
-	if code != 1 {
-		t.Fatalf("unknown worktree_path: exit=%d, want 1 (stderr=%q)", code, stderr)
-	}
-	if !strings.Contains(stderr, unknown) {
-		t.Errorf("stderr must name the path, got %q", stderr)
+	// An existing directory that is not a worktree, and one that does not
+	// exist at all, must both fail without touching anything.
+	for _, unknown := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing")} {
+		code, _, stderr := runEda(t, repo, removeHookInput(repo, unknown), "hook", "worktree-remove")
+		if code != 1 {
+			t.Fatalf("unknown worktree_path %q: exit=%d, want 1 (stderr=%q)", unknown, code, stderr)
+		}
+		if !strings.Contains(stderr, unknown) {
+			t.Errorf("stderr must name the path %q, got %q", unknown, stderr)
+		}
 	}
 	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveEmptyPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	stdin := `{"session_id":"s","cwd":` + jsonString(repo) + `,"hook_event_name":"WorktreeRemove"}`
+	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	if code != 1 {
+		t.Fatalf("missing worktree_path: exit=%d, want 1 (stderr=%q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "worktree_path") {
+		t.Errorf("stderr must name the missing field, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveDetached(t *testing.T) {
+	repo := newTestRepo(t)
+	_, root := loadRepoWithRoot(t, repo)
+	wt := filepath.Join(root, "detached")
+	gitT(t, repo, "worktree", "add", "-q", "--detach", wt)
+
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
+	if code != 1 {
+		t.Fatalf("detached worktree has no branch to remove: exit=%d, want 1 (stderr=%q)", code, stderr)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("detached worktree %q must be kept: %v", wt, err)
+	}
 }
 
 func TestRunHookWorktreeRemoveSymlinkedPath(t *testing.T) {
