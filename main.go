@@ -305,8 +305,9 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		if branch == "" {
 			return fmt.Errorf("worktree_path %s is not a branch worktree", in.WorktreePath)
 		}
-		// The hook is not run in a worktree of its own; the primary
-		// checkout's HEAD is the fallback base.
+		// The hook has no invoking worktree to take a base from (where it
+		// runs is not where the session started); the primary checkout's
+		// HEAD is the fallback base.
 		primaryHead, err := headCommit(ctx.PrimaryPath)
 		if err != nil {
 			return err
