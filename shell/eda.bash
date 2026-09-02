@@ -32,9 +32,11 @@ _eda() {
     switch|remove)
       # Never feed ref names to compgen -W: it expands its word list, so a
       # hostile ref name (fetched from a remote) could execute code. Filter
-      # candidates literally instead, and shell-quote them on the way out:
-      # bash inserts them on the command line verbatim, where an unquoted
-      # $(...) would run on Enter.
+      # candidates literally instead, and shell-quote the ones that carry
+      # shell metacharacters: bash inserts completions on the command line
+      # verbatim, where an unquoted $(...) would run on Enter. Names without
+      # such characters stay as they are, since %q mangles non-ASCII names
+      # into $'...' on bash 3.2 and under LC_ALL=C.
       #
       # The word being completed may carry escapes from an earlier round:
       # bash inserts the common prefix of the quoted candidates, so after
@@ -44,7 +46,10 @@ _eda() {
       while IFS= read -r ref; do
         [[ $ref == HEAD ]] && continue
         [[ $ref == "$plain"* ]] || continue
-        printf -v quoted '%q' "$ref"
+        case $ref in
+          *[\$\`\'\"\;\&\|\<\>\(\)\{\}\!\#]*) printf -v quoted '%q' "$ref" ;;
+          *) quoted=$ref ;;
+        esac
         COMPREPLY+=("$quoted")
       done < <(
         # strip= rather than :short so origin/HEAD comes out as HEAD (its

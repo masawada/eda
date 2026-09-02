@@ -114,6 +114,32 @@ func TestBashCompletionQuotesRefNames(t *testing.T) {
 	}
 }
 
+// TestBashCompletionLeavesPlainNamesUnquoted ensures names without shell
+// metacharacters are inserted as they are: bash 3.2 renders non-ASCII
+// through %q as a garbled $'...' form, and any bash does so under LC_ALL=C.
+func TestBashCompletionLeavesPlainNamesUnquoted(t *testing.T) {
+	repo := newTestRepo(t)
+	names := []string{"feat/a", "x-éa", "機能/a", "v1.2+build@3"}
+	for _, name := range names {
+		gitT(t, repo, "branch", name)
+	}
+	for _, locale := range []string{"", "C"} {
+		t.Run("LC_ALL="+locale, func(t *testing.T) {
+			t.Setenv("LC_ALL", locale)
+			entries := bashCompletion(t, repo, "")
+			seen := map[string]bool{}
+			for _, entry := range entries {
+				seen[entry] = true
+			}
+			for _, name := range names {
+				if !seen[name] {
+					t.Errorf("%q must be offered unquoted, got:\n%s", name, strings.Join(entries, "\n"))
+				}
+			}
+		})
+	}
+}
+
 // TestBashCompletionMatchesEscapedPrefix covers the second Tab: when several
 // quoted candidates share a prefix, bash inserts that prefix, escapes
 // included (`x-\` for `x-\$foo` and `x-\;bar`), so the next completion runs
