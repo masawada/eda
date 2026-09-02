@@ -2,7 +2,7 @@
 
 eda (枝, a branch of a tree) is a small CLI that makes git worktrees as light to work with as branches. One independent task maps to one branch and one worktree, placed under a canonical location outside the repository. It also ships Claude Code worktree hooks so humans and coding agents share the same placement policy.
 
-eda is not a git wrapper: it only manages worktree lifecycle and navigation. `git worktree list --porcelain` is the single source of truth; there is no registry or database. eda never touches the network — syncing with remotes is your job, and every decision is made from local repository state.
+eda is not a git wrapper: it only manages worktree lifecycle and navigation. `git worktree list --porcelain` is the single source of truth; there is no registry or database. eda itself never fetches or pushes — syncing with remotes is your job, and every decision is made from local repository state. Worktrees are created with a plain `git worktree add`, so git's checkout hooks and filters run as configured.
 
 ## Requirements
 
