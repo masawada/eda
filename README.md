@@ -2,7 +2,7 @@
 
 eda (枝, a branch of a tree) is a small CLI that makes git worktrees as light to work with as branches. One independent task maps to one branch and one worktree, placed under a canonical location outside the repository. It also ships Claude Code worktree hooks so humans and coding agents share the same placement policy.
 
-eda is not a git wrapper: it only manages worktree lifecycle and navigation. `git worktree list --porcelain` is the single source of truth; there is no registry or database. eda never touches the network — syncing with remotes is your job, and every decision is made from local repository state.
+eda is not a git wrapper: it only manages worktree lifecycle and navigation. `git worktree list --porcelain` is the single source of truth; there is no registry or database. eda itself never fetches or pushes — syncing with remotes is your job, and every decision is made from local repository state. Worktrees are created with a plain `git worktree add`, so git's checkout hooks and filters run as configured.
 
 ## Requirements
 
@@ -73,9 +73,11 @@ $ git config --global eda.worktreeRoot ~/worktrees
 
 A per-repository value in `.git/config` overrides the global one.
 
+The root is reserved for eda. A worktree under it that has a branch checked out is managed by eda, whichever tool created it; `eda remove` is the way to delete it.
+
 ## Copying ignored files
 
-To carry gitignored files such as `.env` into every new worktree, list them in a `.worktreeinclude` file at the repository root (same name and gitignore syntax as Claude Code's native feature). Only files that match a pattern and are also gitignored are copied. Symbolic links are skipped, never followed.
+To carry gitignored files such as `.env` into every new worktree, list them in a `.worktreeinclude` file at the repository root (same name and gitignore syntax as Claude Code's native feature). Only files that match a pattern and are also gitignored are copied. A path that is tracked, or not ignored, in the new worktree is not copied. Symbolic links are skipped, never followed. The copies are ignored files like the originals, so `eda remove` does not count them as changes.
 
 ## Claude Code integration
 
