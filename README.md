@@ -4,6 +4,10 @@ eda (枝, a branch of a tree) is a small CLI that makes git worktrees as light t
 
 eda is not a git wrapper: it only manages worktree lifecycle and navigation. `git worktree list --porcelain` is the single source of truth; there is no registry or database. eda never touches the network — syncing with remotes is your job, and every decision is made from local repository state.
 
+## Requirements
+
+git 2.36 or later.
+
 ## Install
 
 ```console
