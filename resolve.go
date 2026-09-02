@@ -24,7 +24,7 @@ func resolveWorktree(ctx *repoContext, cwd, branch string) (string, error) {
 		return "", err
 	}
 	if created {
-		if err := copyWorktreeInclude(strings.TrimSpace(srcTop), dir); err != nil {
+		if err := copyWorktreeInclude(strings.TrimSuffix(srcTop, "\n"), dir); err != nil {
 			rollback := ""
 			if _, rbErr := runGit(ctx.PrimaryPath, "worktree", "remove", "--force", dir); rbErr != nil {
 				rollback = fmt.Sprintf("; rollback failed, remove it manually: %v", rbErr)
