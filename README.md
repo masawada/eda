@@ -21,11 +21,11 @@ The integration makes `eda switch` / `eda root` change the current directory and
 ## Usage
 
 ```console
-$ eda switch <branch>   # resolve or create the worktree and move there
-$ eda list              # list worktrees of the current repository
+$ eda switch <branch>     # resolve or create the worktree and move there
+$ eda list                # list worktrees of the current repository
 $ eda remove <branch>...  # remove worktrees and their branches as pairs
-$ eda root              # move back to the primary checkout
-$ eda status            # print current repository, worktree, and branch
+$ eda root                # move back to the primary checkout
+$ eda status              # print current repository, worktree, and branch
 ```
 
 `eda switch` resolves in order: an existing worktree, an existing local branch, a remote branch on `origin` (a tracking branch is created), and finally a new branch based on the HEAD of the directory you run it in — so switching from inside a worktree stacks the new branch on top of it, like `git switch -c`.
@@ -82,4 +82,4 @@ $ make build
 
 ## License
 
-`eda` is licensed under the [MIT License](LICENSE).
+[MIT](LICENSE)
