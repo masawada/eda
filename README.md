@@ -73,6 +73,8 @@ $ git config --global eda.worktreeRoot ~/worktrees
 
 A per-repository value in `.git/config` overrides the global one.
 
+The root is reserved for eda. A worktree under it that has a branch checked out is managed by eda and is removed with `eda remove`, whichever tool created it.
+
 ## Copying ignored files
 
 To carry gitignored files such as `.env` into every new worktree, list them in a `.worktreeinclude` file at the repository root (same name and gitignore syntax as Claude Code's native feature). Only files that match a pattern and are also gitignored are copied. A path that is tracked, or not ignored, in the new worktree is not copied. Symbolic links are skipped, never followed. The copies are ignored files like the originals, so `eda remove` does not count them as changes.
