@@ -81,11 +81,14 @@ func TestBashCompletionQuotesRefNames(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "pwned")
 	// ${IFS} stands in for the space that a ref name may not contain.
 	evil := "x-$(touch${IFS}" + marker + ")"
+	// Other shell metacharacters git accepts in a ref name.
+	odd := "y-`true`;'\"!|&<>#"
 	gitT(t, repo, "branch", evil)
+	gitT(t, repo, "branch", odd)
 	gitT(t, repo, "branch", "feat/a")
 
 	entries := bashCompletion(t, repo, "")
-	want := map[string]bool{"main": false, "feat/a": false, evil: false}
+	want := map[string]bool{"main": false, "feat/a": false, evil: false, odd: false}
 	plain := false
 	for _, entry := range entries {
 		if entry == "feat/a" {
@@ -133,9 +136,11 @@ func zshBranches(t *testing.T, repo string) []string {
 
 // TestCompletionOmitsOriginHEAD ensures a clone's refs/remotes/origin/HEAD
 // does not surface as a bogus `origin` candidate: git shortens it to plain
-// `origin`, which a `origin/` prefix strip leaves untouched.
+// `origin`, which a `origin/` prefix strip leaves untouched. Remote-only
+// branches must still be offered.
 func TestCompletionOmitsOriginHEAD(t *testing.T) {
 	origin := newTestRepo(t)
+	gitT(t, origin, "branch", "feat")
 	clone := filepath.Join(t.TempDir(), "clone")
 	gitT(t, origin, "clone", "-q", origin, clone)
 	if got := strings.TrimSpace(gitT(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD")); got != "refs/remotes/origin/main" {
@@ -156,11 +161,15 @@ func TestCompletionOmitsOriginHEAD(t *testing.T) {
 			for _, entry := range entries {
 				seen[entry] = true
 			}
-			if seen["origin"] {
-				t.Errorf("completion must not offer origin, got:\n%s", strings.Join(entries, "\n"))
+			for _, name := range []string{"origin", "HEAD"} {
+				if seen[name] {
+					t.Errorf("completion must not offer %s, got:\n%s", name, strings.Join(entries, "\n"))
+				}
 			}
-			if !seen["main"] {
-				t.Errorf("completion must offer main, got:\n%s", strings.Join(entries, "\n"))
+			for _, name := range []string{"main", "feat"} {
+				if !seen[name] {
+					t.Errorf("completion must offer %s, got:\n%s", name, strings.Join(entries, "\n"))
+				}
 			}
 		})
 	}
