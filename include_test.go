@@ -137,3 +137,37 @@ func TestResolveWorktreeCopiesIncludes(t *testing.T) {
 		t.Errorf(".env must be copied into the new worktree: %v", err)
 	}
 }
+
+func TestResolveWorktreeSkipsDanglingSymlinkInclude(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// A stale link matching an include pattern must not block creation.
+	if err := os.Symlink("/nonexistent/.env", filepath.Join(repo, "secrets", "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	wt := mustResolve(t, ctx, repo, "feature-x")
+	if _, err := os.Lstat(filepath.Join(wt, "secrets", "dangling")); !os.IsNotExist(err) {
+		t.Errorf("dangling symlink must not be copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".env")); err != nil {
+		t.Errorf(".env must still be copied: %v", err)
+	}
+}
+
+func TestResolveWorktreeSkipsSymlinkInclude(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// A link to a real file must not be dereferenced into a regular copy.
+	if err := os.Symlink("key.txt", filepath.Join(repo, "secrets", "link")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	wt := mustResolve(t, ctx, repo, "feature-x")
+	if _, err := os.Lstat(filepath.Join(wt, "secrets", "link")); !os.IsNotExist(err) {
+		t.Errorf("symlink must not be copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "secrets", "key.txt")); err != nil {
+		t.Errorf("regular file next to the link must still be copied: %v", err)
+	}
+}
