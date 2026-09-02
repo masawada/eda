@@ -94,7 +94,7 @@ Configure the worktree hooks in `~/.claude/settings.json` so that worktrees Clau
 }
 ```
 
-The create hook has exactly the same semantics as `eda switch`, with the session's current directory as the base: a subagent spawned inside a worktree stacks on that worktree. The remove hook deletes the worktree only when nothing would be lost, and keeps it (reporting on stderr) otherwise.
+The create hook has exactly the same semantics as `eda switch`, with the session's current directory as the base: a subagent spawned inside a worktree stacks on that worktree. The remove hook receives the path of that worktree and removes the worktree and its branch together, but only when nothing would be lost; otherwise it leaves both in place. Claude Code ignores the hook's result, so a kept worktree shows up only in Claude Code's debug log and in `eda list`.
 
 ## Development
 
