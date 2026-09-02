@@ -21,6 +21,16 @@ eda() {
   esac
 }
 
+# Prints one branch candidate per line: local branches plus origin's.
+# strip= rather than :short so origin/HEAD comes out as HEAD (its short
+# form is a bare "origin") and gets dropped with the local HEAD.
+_eda_branches() {
+  local -aU branches
+  branches=(${(f)"$(git for-each-ref --format='%(refname:strip=2)' refs/heads 2>/dev/null)"})
+  branches+=(${(f)"$(git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin 2>/dev/null)"})
+  print -l -- ${branches:#HEAD}
+}
+
 _eda() {
   local -a cmds
   cmds=(
@@ -37,10 +47,8 @@ _eda() {
   fi
   case "$words[2]" in
     switch|remove)
-      local -aU branches
-      branches=(${(f)"$(git for-each-ref --format='%(refname:short)' refs/heads 2>/dev/null)"})
-      branches+=(${${(f)"$(git for-each-ref --format='%(refname:short)' refs/remotes/origin 2>/dev/null)"}#origin/})
-      branches=(${branches:#HEAD})
+      local -a branches
+      branches=(${(f)"$(_eda_branches)"})
       _describe 'branch' branches
       ;;
   esac
