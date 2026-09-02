@@ -80,8 +80,9 @@ func (b removeBase) headFor(path string) (oid, desc string) {
 // HEAD that base names.
 //
 // All conditions are checked before any deletion. A failure between the
-// worktree removal and the branch deletion can still leave a partial state;
-// re-running converges it.
+// worktree removal and the branch deletion leaves the branch behind without
+// a worktree; eda does not remove such a branch, so it must be deleted by
+// hand.
 func removeWorktree(ctx *repoContext, base removeBase, branch string, force bool) error {
 	if err := validateBranchName(ctx.PrimaryPath, branch); err != nil {
 		return err
@@ -145,7 +146,9 @@ func removeWorktree(ctx *repoContext, base removeBase, branch string, force bool
 	// directory it runs in rather than the base checked above, so deletion
 	// uses -D.
 	if _, err := runGit(ctx.PrimaryPath, "branch", "-q", "-D", branch); err != nil {
-		return fmt.Errorf("worktree removed but branch deletion failed: %w", err)
+		// The branch name is data here, not a command to paste: it may
+		// contain shell metacharacters.
+		return fmt.Errorf("worktree removed but branch %q was not deleted (%v); delete it manually", branch, err)
 	}
 	return nil
 }
