@@ -284,6 +284,49 @@ func TestRunRemoveForce(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRunRemoveForceWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// `git switch --orphan` leaves the primary checkout on an unborn HEAD
+	// that resolves to no commit. A forced removal judges nothing against
+	// a base, so it must not need one.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, "", "remove", "--force", "topic")
+	if code != 0 {
+		t.Fatalf("remove --force: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "topic")
+}
+
+func TestRunRemoveMultipleWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "a")
+	wtB := mustResolve(t, ctx, repo, "b")
+	wtC := mustResolve(t, ctx, repo, "c")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "a")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "c")
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	// The unborn HEAD fails only b, which has no upstream to be judged by;
+	// a before it and c after it are removed through their upstreams.
+	code, _, stderr := runEda(t, repo, "", "remove", "a", "b", "c")
+	if code == 0 {
+		t.Fatal("a branch judged by the unborn HEAD must fail the command")
+	}
+	assertRemoved(t, repo, wtA, "a")
+	assertKept(t, repo, wtB, "b")
+	assertRemoved(t, repo, wtC, "c")
+	if !strings.Contains(stderr, "remove b:") || !strings.Contains(stderr, "cannot resolve HEAD") {
+		t.Errorf("stderr must report the unresolvable HEAD for b, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "failed to remove 1 of 3") {
+		t.Errorf("stderr must summarize the failures, got %q", stderr)
+	}
+}
+
 func TestRunStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
@@ -485,6 +528,22 @@ func TestRunHookWorktreeRemoveKeepsDuplicateBranch(t *testing.T) {
 	}
 	assertKept(t, repo, wt, "agent-abc")
 	assertKept(t, repo, dup, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "agent-abc")
+	// The primary HEAD is the hook's fallback base; unborn, it cannot be
+	// resolved, but a branch judged by its upstream never needs it.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
 }
 
 func TestRunHookWorktreeRemoveFromOtherDirectory(t *testing.T) {

@@ -168,9 +168,12 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	base, err := invocationBase(ctx, cwd)
-	if err != nil {
-		return err
+	// A forced removal judges nothing against a base, so it takes none.
+	var base removeBase
+	if !*force {
+		if base, err = invocationBase(ctx, cwd); err != nil {
+			return err
+		}
 	}
 	// A single branch keeps the plain one-line error; the per-branch prefix
 	// and the summary would only repeat it.
@@ -309,12 +312,9 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		}
 		// The hook has no invoking worktree to take a base from (where it
 		// runs is not where the session started); the primary checkout's
-		// HEAD is the fallback base.
-		primaryHead, err := headCommit(ctx.PrimaryPath)
-		if err != nil {
-			return err
-		}
-		if err := removeWorktree(ctx, removeBase{PrimaryHead: primaryHead}, branch, false); err != nil {
+		// HEAD is the fallback base, needed only without an upstream.
+		base := removeBase{PrimaryHead: resolveHead(ctx.PrimaryPath)}
+		if err := removeWorktree(ctx, base, branch, false); err != nil {
 			var refusal refusalError
 			if errors.As(err, &refusal) {
 				// Keeping a worktree that still holds work is a valid
