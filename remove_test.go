@@ -36,11 +36,16 @@ func baseFrom(t *testing.T, ctx *repoContext, cwd string) removeBase {
 	return base
 }
 
-// removeFrom runs removeWorktree as a remove command started in cwd would.
+// removeFrom runs removeWorktree as a remove command started in cwd would:
+// a forced removal takes no base, like cmdRemove.
 func removeFrom(t *testing.T, repo, cwd, branch string, force bool) error {
 	t.Helper()
 	ctx := reload(t, repo)
-	return removeWorktree(ctx, baseFrom(t, ctx, cwd), branch, force)
+	var base removeBase
+	if !force {
+		base = baseFrom(t, ctx, cwd)
+	}
+	return removeWorktree(ctx, base, branch, force)
 }
 
 // newTestClone clones a fresh test repository so branches can have a
