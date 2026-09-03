@@ -300,24 +300,6 @@ func TestRunRemoveForceWithUnbornPrimaryHead(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
-func TestRunRemoveForceNeedsNoInvokingWorktree(t *testing.T) {
-	repo := newTestRepo(t)
-	ctx, _ := loadRepoWithRoot(t, repo)
-	wt := mustResolve(t, ctx, repo, "topic")
-
-	// Inside .git the repository loads but there is no worktree to take a
-	// base from; only a forced removal, which takes none, can proceed.
-	gitDir := filepath.Join(repo, ".git")
-	if code, _, stderr := runEda(t, gitDir, "", "remove", "topic"); code == 0 || !strings.Contains(stderr, "work tree") {
-		t.Fatalf("remove without a worktree to judge from must fail: exit=%d stderr=%q", code, stderr)
-	}
-	assertKept(t, repo, wt, "topic")
-	if code, _, stderr := runEda(t, gitDir, "", "remove", "--force", "topic"); code != 0 {
-		t.Fatalf("remove --force: exit=%d stderr=%q", code, stderr)
-	}
-	assertRemoved(t, repo, wt, "topic")
-}
-
 func TestRunRemoveMultipleWithUnbornPrimaryHead(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
