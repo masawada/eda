@@ -467,6 +467,26 @@ func TestRunHookWorktreeRemoveUsesPrimaryHead(t *testing.T) {
 	assertKept(t, repo, wtB, "agent-b")
 }
 
+func TestRunHookWorktreeRemoveKeepsDuplicateBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, root := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	dup := filepath.Join(root, "dup")
+	gitT(t, repo, "worktree", "add", "-q", "--force", dup, "agent-abc")
+
+	// The hook removes by branch, and the branch names two worktrees: it
+	// must not delete the other one in place of the path it was given.
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, dup), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("keeping a worktree is a success for the hook: exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "worktree kept") {
+		t.Errorf("the kept worktree must be reported on stderr, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "agent-abc")
+	assertKept(t, repo, dup, "agent-abc")
+}
+
 func TestRunHookWorktreeRemoveFromOtherDirectory(t *testing.T) {
 	// The session cwd follows `cd`, so by the time the session ends it may
 	// be in another repository or outside any; worktree_path alone must

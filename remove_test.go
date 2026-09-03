@@ -352,6 +352,54 @@ func TestRemoveWorktreeRefusesPrunable(t *testing.T) {
 	}
 }
 
+func TestRemoveWorktreeRefusesDuplicateBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, root := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// `git worktree add --force` attaches a branch that is already checked
+	// out elsewhere; the branch then names two worktrees and eda cannot
+	// tell which one to remove.
+	dup := filepath.Join(root, "dup")
+	gitT(t, repo, "worktree", "add", "-q", "--force", dup, "topic")
+
+	err := removeFrom(t, repo, repo, "topic", true)
+	var refusal refusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("branch attached to two worktrees must be refused, got %v", err)
+	}
+	for _, path := range []string{wt, dup} {
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("refusal must list the worktree %q, got %q", path, err)
+		}
+	}
+	list := gitT(t, repo, "worktree", "list", "--porcelain")
+	for _, path := range []string{wt, dup} {
+		if !strings.Contains(list, "worktree "+path+"\n") {
+			t.Errorf("worktree %q must stay registered, got %q", path, list)
+		}
+	}
+	assertKept(t, repo, wt, "topic")
+	assertKept(t, repo, dup, "topic")
+}
+
+func TestRemoveWorktreeRefusesDuplicateBranchOutsideRoot(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// The duplicate outside the root is not eda's, but neither is the
+	// decision which attach is the real one: nothing is touched.
+	dup := filepath.Join(t.TempDir(), "manual-wt")
+	gitT(t, repo, "worktree", "add", "-q", "--force", dup, "topic")
+
+	err := removeFrom(t, repo, repo, "topic", true)
+	var refusal refusalError
+	if !errors.As(err, &refusal) {
+		t.Fatalf("branch attached to two worktrees must be refused, got %v", err)
+	}
+	assertKept(t, repo, wt, "topic")
+	assertKept(t, repo, dup, "topic")
+}
+
 func TestRemoveWorktreeCleanCheckIgnoresStatusConfig(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
