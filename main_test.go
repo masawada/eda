@@ -177,6 +177,49 @@ func TestRunRemoveMultipleBestEffort(t *testing.T) {
 	}
 }
 
+func TestRunRemoveMultipleFromInvokingWorktree(t *testing.T) {
+	repo := newTestClone(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "work on a")
+	gitT(t, wtA, "push", "-q", "-u", "origin", "a")
+	wtB := mustResolve(t, reload(t, repo), wtA, "b")
+
+	// Run from worktree a: a passes through its upstream, and b (no
+	// upstream, tip reachable only from the HEAD of a) must still be judged
+	// against the HEAD the command started with, even though removing a
+	// deleted that directory and branch.
+	code, _, stderr := runEda(t, wtA, "", "remove", "a", "b")
+	if code != 0 {
+		t.Fatalf("remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wtA, "a")
+	assertRemoved(t, repo, wtB, "b")
+}
+
+func TestRunRemoveFromInsideViaSymlink(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "unique work")
+
+	// Entered through a symlink, the invoking directory must still be
+	// recognized as the worktree being removed, so the primary HEAD is the
+	// base and not the worktree's own HEAD.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(wt, link); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runEda(t, link, "", "remove", "topic")
+	if code == 0 {
+		t.Fatal("unmerged branch must be refused from inside its own worktree")
+	}
+	if !strings.Contains(stderr, "the HEAD of the primary checkout") {
+		t.Errorf("stderr must name the primary HEAD as the base, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "topic")
+}
+
 func TestRunRemoveDuplicateBranch(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
@@ -242,6 +285,49 @@ func TestRunRemoveForce(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRunRemoveForceWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// `git switch --orphan` leaves the primary checkout on an unborn HEAD
+	// that resolves to no commit. A forced removal judges nothing against
+	// a base, so it must not need one.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, "", "remove", "--force", "topic")
+	if code != 0 {
+		t.Fatalf("remove --force: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "topic")
+}
+
+func TestRunRemoveMultipleWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "a")
+	wtB := mustResolve(t, ctx, repo, "b")
+	wtC := mustResolve(t, ctx, repo, "c")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "a")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "c")
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	// The unborn HEAD fails only b, which has no upstream to be judged by;
+	// a before it and c after it are removed through their upstreams.
+	code, _, stderr := runEda(t, repo, "", "remove", "a", "b", "c")
+	if code == 0 {
+		t.Fatal("a branch judged by the unborn HEAD must fail the command")
+	}
+	assertRemoved(t, repo, wtA, "a")
+	assertKept(t, repo, wtB, "b")
+	assertRemoved(t, repo, wtC, "c")
+	if !strings.Contains(stderr, "remove b:") || !strings.Contains(stderr, "cannot resolve HEAD") {
+		t.Errorf("stderr must report the unresolvable HEAD for b, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "failed to remove 1 of 3") {
+		t.Errorf("stderr must summarize the failures, got %q", stderr)
+	}
+}
+
 func TestRunStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
@@ -256,6 +342,26 @@ func TestRunStatus(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("status output missing %q, got %q", want, stdout)
 		}
+	}
+}
+
+// TestRunStatusKeepsPathEndingInSpace guards the worktree line against
+// whitespace trimming: `git rev-parse --show-toplevel` ends in a newline,
+// and trimming more than that silently drops a trailing space of the path.
+func TestRunStatusKeepsPathEndingInSpace(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo ")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTestRepoAt(t, dir)
+	loadRepoWithRoot(t, repo)
+
+	code, stdout, _ := runEda(t, repo, "", "status")
+	if code != 0 {
+		t.Fatalf("status: exit = %d", code)
+	}
+	if want := "worktree " + repo + "\n"; !strings.Contains(stdout, want) {
+		t.Errorf("status output missing %q, got %q", want, stdout)
 	}
 }
 
@@ -278,15 +384,94 @@ func TestRunHookWorktreeCreate(t *testing.T) {
 	}
 }
 
+// removeHookInput builds the WorktreeRemove payload: the common fields plus
+// worktree_path, the path the create hook returned. There is no name field.
+func removeHookInput(cwd, worktreePath string) string {
+	return `{"session_id":"s","cwd":` + jsonString(cwd) + `,"hook_event_name":"WorktreeRemove","worktree_path":` + jsonString(worktreePath) + `}`
+}
+
 func TestRunHookWorktreeRemove(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
-	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
 	if code != 0 {
 		t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveUnknownPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	// An existing directory that is not a worktree, one that does not exist
+	// at all, and a directory inside the worktree (which locates the
+	// repository but is not the worktree itself) must all fail without
+	// touching anything.
+	sub := filepath.Join(wt, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, unknown := range []string{t.TempDir(), filepath.Join(t.TempDir(), "missing"), sub} {
+		code, _, stderr := runEda(t, repo, removeHookInput(repo, unknown), "hook", "worktree-remove")
+		if code != 1 {
+			t.Fatalf("unknown worktree_path %q: exit=%d, want 1 (stderr=%q)", unknown, code, stderr)
+		}
+		if !strings.Contains(stderr, unknown) {
+			t.Errorf("stderr must name the path %q, got %q", unknown, stderr)
+		}
+	}
+	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveEmptyPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	stdin := `{"session_id":"s","cwd":` + jsonString(repo) + `,"hook_event_name":"WorktreeRemove"}`
+	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	if code != 1 {
+		t.Fatalf("missing worktree_path: exit=%d, want 1 (stderr=%q)", code, stderr)
+	}
+	if !strings.Contains(stderr, "worktree_path") {
+		t.Errorf("stderr must name the missing field, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveDetached(t *testing.T) {
+	repo := newTestRepo(t)
+	_, root := loadRepoWithRoot(t, repo)
+	wt := filepath.Join(root, "detached")
+	gitT(t, repo, "worktree", "add", "-q", "--detach", wt)
+
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
+	if code != 1 {
+		t.Fatalf("detached worktree has no branch to remove: exit=%d, want 1 (stderr=%q)", code, stderr)
+	}
+	if _, err := os.Stat(wt); err != nil {
+		t.Errorf("detached worktree %q must be kept: %v", wt, err)
+	}
+}
+
+func TestRunHookWorktreeRemoveSymlinkedPath(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	// git records realpaths; a path reaching the worktree through a symlink
+	// must still identify it.
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(wt), link); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, filepath.Join(link, filepath.Base(wt))), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove via symlink: exit=%d stderr=%q", code, stderr)
 	}
 	assertRemoved(t, repo, wt, "agent-abc")
 }
@@ -297,8 +482,7 @@ func TestRunHookWorktreeRemoveKeepsUnsafe(t *testing.T) {
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
-	code, _, stderr := runEda(t, repo, stdin, "hook", "worktree-remove")
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
 	if code != 0 {
 		t.Fatalf("keeping a worktree is a success for the hook: exit=%d", code)
 	}
@@ -306,6 +490,93 @@ func TestRunHookWorktreeRemoveKeepsUnsafe(t *testing.T) {
 		t.Error("the kept worktree must be reported on stderr")
 	}
 	assertKept(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveUsesPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "agent-a")
+	gitT(t, wtA, "commit", "-q", "--allow-empty", "-m", "work on a")
+	wtB := mustResolve(t, reload(t, repo), wtA, "agent-b")
+
+	// The session cwd is worktree a, whose HEAD reaches the tip of b; the
+	// hook must judge against the primary HEAD instead and keep b.
+	code, _, stderr := runEda(t, repo, removeHookInput(wtA, wtB), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("keeping a worktree is a success for the hook: exit=%d stderr=%q", code, stderr)
+	}
+	if stderr == "" {
+		t.Error("the kept worktree must be reported on stderr")
+	}
+	assertKept(t, repo, wtB, "agent-b")
+}
+
+func TestRunHookWorktreeRemoveKeepsDuplicateBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, root := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	dup := filepath.Join(root, "dup")
+	gitT(t, repo, "worktree", "add", "-q", "--force", dup, "agent-abc")
+
+	// The hook removes by branch, and the branch names two worktrees: it
+	// must not delete the other one in place of the path it was given.
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, dup), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("keeping a worktree is a success for the hook: exit=%d stderr=%q", code, stderr)
+	}
+	if !strings.Contains(stderr, "worktree kept") {
+		t.Errorf("the kept worktree must be reported on stderr, got %q", stderr)
+	}
+	assertKept(t, repo, wt, "agent-abc")
+	assertKept(t, repo, dup, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "agent-abc")
+	// The primary HEAD is the hook's fallback base; unborn, it cannot be
+	// resolved, but a branch judged by its upstream never needs it.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
+}
+
+func TestRunHookWorktreeRemoveFromOtherDirectory(t *testing.T) {
+	// The session cwd follows `cd`, so by the time the session ends it may
+	// be in another repository or outside any; worktree_path alone must
+	// identify the worktree. The hook process cwd is outside as well.
+	for name, cwd := range map[string]string{"other repository": newTestRepo(t), "no repository": t.TempDir()} {
+		t.Run(name, func(t *testing.T) {
+			repo := newTestRepo(t)
+			ctx, _ := loadRepoWithRoot(t, repo)
+			wt := mustResolve(t, ctx, repo, "agent-abc")
+
+			code, _, stderr := runEda(t, cwd, removeHookInput(cwd, wt), "hook", "worktree-remove")
+			if code != 0 {
+				t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+			}
+			assertRemoved(t, repo, wt, "agent-abc")
+		})
+	}
+}
+
+func TestRunHookWorktreeRemoveWithoutCwd(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+
+	stdin := `{"session_id":"s","hook_event_name":"WorktreeRemove","worktree_path":` + jsonString(wt) + `}`
+	code, _, stderr := runEda(t, t.TempDir(), stdin, "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove without cwd: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
 }
 
 func TestRunVersion(t *testing.T) {
@@ -412,9 +683,8 @@ func TestRunHookWorktreeRemoveKeptReportFails(t *testing.T) {
 	wt := mustResolve(t, ctx, repo, "agent-abc")
 	gitT(t, wt, "commit", "-q", "--allow-empty", "-m", "agent work")
 
-	stdin := `{"cwd":` + jsonString(repo) + `,"name":"agent-abc"}`
 	var stdout strings.Builder
-	if code := run(strings.NewReader(stdin), &stdout, failWriter{}, []string{"hook", "worktree-remove"}, repo); code == 0 {
+	if code := run(strings.NewReader(removeHookInput(repo, wt)), &stdout, failWriter{}, []string{"hook", "worktree-remove"}, repo); code == 0 {
 		t.Error("an undeliverable kept-report must fail the hook, not report success")
 	}
 	assertKept(t, repo, wt, "agent-abc")

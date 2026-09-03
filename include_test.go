@@ -31,6 +31,35 @@ func setupIncludeRepo(t *testing.T) string {
 	return repo
 }
 
+// TestResolveWorktreeCopiesIncludesFromPathEndingInSpace guards the source
+// path against whitespace trimming: `git rev-parse --show-toplevel` ends in
+// a newline, and trimming more than that silently loses a trailing space of
+// the repository path, so the include file is looked up in the wrong place.
+func TestResolveWorktreeCopiesIncludesFromPathEndingInSpace(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "repo ")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	repo := newTestRepoAt(t, dir)
+	writeFile := func(rel, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, rel), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(".gitignore", ".env\n")
+	gitT(t, repo, "add", ".gitignore")
+	gitT(t, repo, "commit", "-q", "-m", "add gitignore")
+	writeFile(".env", "SECRET=1\n")
+	writeFile(".worktreeinclude", ".env\n")
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	wt := mustResolve(t, ctx, repo, "feature-x")
+	if _, err := os.Stat(filepath.Join(wt, ".env")); err != nil {
+		t.Errorf(".env must be copied from a repository path ending in a space: %v", err)
+	}
+}
+
 func TestCopyWorktreeInclude(t *testing.T) {
 	repo := setupIncludeRepo(t)
 	dst := filepath.Join(t.TempDir(), "wt")
@@ -135,5 +164,39 @@ func TestResolveWorktreeCopiesIncludes(t *testing.T) {
 	wt := mustResolve(t, ctx, repo, "feature-x")
 	if _, err := os.Stat(filepath.Join(wt, ".env")); err != nil {
 		t.Errorf(".env must be copied into the new worktree: %v", err)
+	}
+}
+
+func TestResolveWorktreeSkipsDanglingSymlinkInclude(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// A stale link matching an include pattern must not block creation.
+	if err := os.Symlink("/nonexistent/.env", filepath.Join(repo, "secrets", "dangling")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	wt := mustResolve(t, ctx, repo, "feature-x")
+	if _, err := os.Lstat(filepath.Join(wt, "secrets", "dangling")); !os.IsNotExist(err) {
+		t.Errorf("dangling symlink must not be copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".env")); err != nil {
+		t.Errorf(".env must still be copied: %v", err)
+	}
+}
+
+func TestResolveWorktreeSkipsSymlinkInclude(t *testing.T) {
+	repo := setupIncludeRepo(t)
+	// A link to a real file must not be dereferenced into a regular copy.
+	if err := os.Symlink("key.txt", filepath.Join(repo, "secrets", "link")); err != nil {
+		t.Fatal(err)
+	}
+	ctx, _ := loadRepoWithRoot(t, repo)
+
+	wt := mustResolve(t, ctx, repo, "feature-x")
+	if _, err := os.Lstat(filepath.Join(wt, "secrets", "link")); !os.IsNotExist(err) {
+		t.Errorf("symlink must not be copied: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(wt, "secrets", "key.txt")); err != nil {
+		t.Errorf("regular file next to the link must still be copied: %v", err)
 	}
 }

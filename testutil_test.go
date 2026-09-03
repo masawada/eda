@@ -22,9 +22,14 @@ func gitT(t *testing.T, dir string, args ...string) string {
 // realpaths). Global and system git config are neutralized per test.
 func newTestRepo(t *testing.T) string {
 	t.Helper()
+	return newTestRepoAt(t, t.TempDir())
+}
+
+// newTestRepoAt is newTestRepo in the given directory, which must exist.
+func newTestRepoAt(t *testing.T, dir string) string {
+	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
-	dir := t.TempDir()
 	resolved, err := filepath.EvalSymlinks(dir)
 	if err != nil {
 		t.Fatalf("EvalSymlinks(%q): %v", dir, err)

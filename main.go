@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 )
@@ -41,9 +42,10 @@ func main() {
 	os.Exit(run(os.Stdin, os.Stdout, os.Stderr, os.Args[1:], cwd))
 }
 
-// run dispatches subcommands. Commands that print a path emit exactly one
-// absolute path line on stdout and nothing else; all diagnostics go to
-// stderr. Shell integration and the Claude Code hooks rely on this contract.
+// run dispatches subcommands. Commands that print a path write the absolute
+// path bytes followed by a single newline on stdout and nothing else; all
+// diagnostics go to stderr. Shell integration and the Claude Code hooks rely
+// on this contract.
 func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprint(stderr, usage)
@@ -88,9 +90,10 @@ func singleBranchArg(cmd string, args []string) (string, error) {
 	return args[0], nil
 }
 
-// printPath writes the single path line that shell integration and the
-// hooks consume. A write failure must fail the command: reporting success
-// with a missing or partial path would break the stdout contract.
+// printPath writes the path bytes followed by a newline, the output that
+// shell integration and the hooks consume. A write failure must fail the
+// command: reporting success with a missing or partial path would break the
+// stdout contract.
 func printPath(w io.Writer, path string) error {
 	if _, err := fmt.Fprintln(w, path); err != nil {
 		return fmt.Errorf("write path: %w", err)
@@ -174,10 +177,17 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
+	// A forced removal judges nothing against a base, so it takes none.
+	var base removeBase
+	if !*force {
+		if base, err = invocationBase(ctx, cwd); err != nil {
+			return err
+		}
+	}
 	// A single branch keeps the plain one-line error; the per-branch prefix
 	// and the summary would only repeat it.
 	if len(branches) == 1 {
-		return removeWorktree(ctx, branches[0], *force)
+		return removeWorktree(ctx, base, branches[0], *force)
 	}
 	failed := 0
 	for i, branch := range branches {
@@ -190,7 +200,7 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 				return err
 			}
 		}
-		if err := removeWorktree(ctx, branch, *force); err != nil {
+		if err := removeWorktree(ctx, base, branch, *force); err != nil {
 			failed++
 			// A failed diagnostics write aborts the run: the caller relies
 			// on this report, like the kept-report in cmdHook.
@@ -233,7 +243,7 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 		return err
 	}
 	_, err = fmt.Fprintf(stdout, "primary  %s\nworktree %s\nbranch   %s\n",
-		ctx.PrimaryPath, strings.TrimSpace(top), strings.TrimSpace(branch))
+		ctx.PrimaryPath, strings.TrimSuffix(top, "\n"), strings.TrimSuffix(branch, "\n"))
 	return err
 }
 
@@ -251,15 +261,16 @@ func cmdVersion(stdout io.Writer, args []string) error {
 }
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
-// is the session's current directory; it decides the base of new branches so
-// a subagent spawned inside a worktree stacks on that worktree. The path
-// field is speculative for WorktreeRemove, whose real schema could not be
-// observed in the step0 spike (the hook never fired for hook-created
-// worktrees).
+// is the session's current directory. WorktreeCreate sends name (the slug of
+// the new worktree) and uses cwd as the base of the new branch, so a subagent
+// spawned inside a worktree stacks on that worktree. WorktreeRemove sends
+// worktree_path (the path the create hook returned) and no name; it ignores
+// cwd, which follows the session's `cd` and may have left the repository by
+// the time the session ends.
 type hookInput struct {
-	Name string `json:"name"`
-	Cwd  string `json:"cwd"`
-	Path string `json:"path"`
+	Name         string `json:"name"`
+	Cwd          string `json:"cwd"`
+	WorktreePath string `json:"worktree_path"`
 }
 
 func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) error {
@@ -274,17 +285,17 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 	if err := json.Unmarshal(body, &in); err != nil {
 		return fmt.Errorf("decode hook input: %w", err)
 	}
-	// Fall back to the hook process working directory when cwd is absent;
-	// both were observed to be the session directory in the step0 spike.
-	dir := in.Cwd
-	if dir == "" {
-		dir = cwd
-	}
-
 	switch args[0] {
 	case "worktree-create":
 		if in.Name == "" {
 			return fmt.Errorf("hook input has no worktree name")
+		}
+		// Fall back to the hook process working directory when cwd is
+		// absent; Claude Code runs hooks in the session directory, so both
+		// agree.
+		dir := in.Cwd
+		if dir == "" {
+			dir = cwd
 		}
 		ctx, err := loadRepo(dir)
 		if err != nil {
@@ -296,23 +307,36 @@ func cmdHook(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd strin
 		}
 		return printPath(stdout, wt)
 	case "worktree-remove":
-		ctx, err := loadRepo(dir)
-		if err != nil {
-			return err
+		if in.WorktreePath == "" {
+			return fmt.Errorf("hook input has no worktree_path")
 		}
-		branch := in.Name
-		if branch == "" && in.Path != "" {
-			for _, e := range ctx.Entries {
-				if e.Path == in.Path {
-					branch = e.Branch
-					break
-				}
+		// Entries hold the realpaths git recorded; resolve the input the
+		// same way so a symlinked path still matches.
+		resolved, err := filepath.EvalSymlinks(in.WorktreePath)
+		if err != nil {
+			return fmt.Errorf("resolve worktree_path %s: %w", in.WorktreePath, err)
+		}
+		// The worktree itself locates its repository; the session cwd may
+		// be in another one by now.
+		ctx, err := loadRepo(resolved)
+		if err != nil {
+			return fmt.Errorf("worktree_path %s: %w", in.WorktreePath, err)
+		}
+		branch := ""
+		for _, e := range ctx.Entries {
+			if e.Path == resolved {
+				branch = e.Branch
+				break
 			}
 		}
 		if branch == "" {
-			return fmt.Errorf("hook input identifies no worktree (name and path are empty or unknown)")
+			return fmt.Errorf("worktree_path %s is not a branch worktree", in.WorktreePath)
 		}
-		if err := removeWorktree(ctx, branch, false); err != nil {
+		// The hook has no invoking worktree to take a base from (where it
+		// runs is not where the session started); the primary checkout's
+		// HEAD is the fallback base, needed only without an upstream.
+		base := removeBase{PrimaryHead: resolveHead(ctx.PrimaryPath)}
+		if err := removeWorktree(ctx, base, branch, false); err != nil {
 			var refusal refusalError
 			if errors.As(err, &refusal) {
 				// Keeping a worktree that still holds work is a valid
