@@ -30,19 +30,37 @@ func managedWorktree(ctx *repoContext, path string) bool {
 // removeBase is the HEAD a branch without a resolvable upstream is judged
 // against, fixed once when the command starts so that every branch of one
 // invocation sees the same commits, whatever earlier removals deleted.
+// Resolving a HEAD may fail (unborn, as after `git switch --orphan`); the
+// failure is kept as well and surfaces only for a branch that needs that
+// HEAD, so branches judged by their upstream are unaffected. The zero value
+// is the base of a forced removal, which judges nothing.
 type removeBase struct {
 	// Top is the realpath of the worktree the command was run in, empty
-	// when it was not run in one (the hook), and Head is the OID its HEAD
-	// pointed to.
+	// when it was not run in one (the hook), and Head is what its HEAD
+	// resolved to.
 	Top  string
-	Head string
-	// PrimaryHead is the OID of the primary checkout's HEAD. It replaces
-	// Head for the worktree the command was run in, and is the base for
-	// everything when there is no such worktree.
-	PrimaryHead string
+	Head resolvedHead
+	// PrimaryHead is what the primary checkout's HEAD resolved to. It
+	// replaces Head for the worktree the command was run in, and is the
+	// base for everything when there is no such worktree.
+	PrimaryHead resolvedHead
 }
 
-// invocationBase resolves the removeBase of a command run in cwd.
+// resolvedHead is the outcome of resolving a HEAD to a commit: the OID, or
+// the error to report should that HEAD be needed as a base.
+type resolvedHead struct {
+	OID string
+	Err error
+}
+
+func resolveHead(dir string) resolvedHead {
+	oid, err := headCommit(dir)
+	return resolvedHead{OID: oid, Err: err}
+}
+
+// invocationBase resolves the removeBase of a command run in cwd. It fails
+// when cwd is not in a worktree; a HEAD that does not resolve is recorded,
+// not reported.
 func invocationBase(ctx *repoContext, cwd string) (removeBase, error) {
 	out, err := runGit(cwd, "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -54,24 +72,16 @@ func invocationBase(ctx *repoContext, cwd string) (removeBase, error) {
 	if err != nil {
 		return removeBase{}, fmt.Errorf("resolve invoking worktree path: %w", err)
 	}
-	head, err := headCommit(cwd)
-	if err != nil {
-		return removeBase{}, err
-	}
-	primaryHead, err := headCommit(ctx.PrimaryPath)
-	if err != nil {
-		return removeBase{}, err
-	}
-	return removeBase{Top: top, Head: head, PrimaryHead: primaryHead}, nil
+	return removeBase{Top: top, Head: resolveHead(cwd), PrimaryHead: resolveHead(ctx.PrimaryPath)}, nil
 }
 
 // headFor returns the base OID for the worktree at path and a description
-// of it for diagnostics.
-func (b removeBase) headFor(path string) (oid, desc string) {
+// of it for diagnostics, or the error resolving that HEAD produced.
+func (b removeBase) headFor(path string) (oid, desc string, err error) {
 	if b.Top == "" || path == b.Top {
-		return b.PrimaryHead, "the HEAD of the primary checkout"
+		return b.PrimaryHead.OID, "the HEAD of the primary checkout", b.PrimaryHead.Err
 	}
-	return b.Head, "the HEAD of " + b.Top
+	return b.Head.OID, "the HEAD of " + b.Top, b.Head.Err
 }
 
 // removeWorktree deletes a worktree and its branch as a pair. Unless force
@@ -132,7 +142,10 @@ func removeWorktree(ctx *repoContext, base removeBase, branch string, force bool
 			return err
 		}
 		if rev == "" {
-			rev, desc = base.headFor(entry.Path)
+			rev, desc, err = base.headFor(entry.Path)
+			if err != nil {
+				return fmt.Errorf("cannot judge branch %q against %s: %w", branch, desc, err)
+			}
 		}
 		reachable, err := isAncestor(ctx.PrimaryPath, "refs/heads/"+branch, rev)
 		if err != nil {

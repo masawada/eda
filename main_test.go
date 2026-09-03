@@ -503,6 +503,22 @@ func TestRunHookWorktreeRemoveKeepsDuplicateBranch(t *testing.T) {
 	assertKept(t, repo, dup, "agent-abc")
 }
 
+func TestRunHookWorktreeRemoveWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "agent-abc")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "agent-abc")
+	// The primary HEAD is the hook's fallback base; unborn, it cannot be
+	// resolved, but a branch judged by its upstream never needs it.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, removeHookInput(repo, wt), "hook", "worktree-remove")
+	if code != 0 {
+		t.Fatalf("hook worktree-remove: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "agent-abc")
+}
+
 func TestRunHookWorktreeRemoveFromOtherDirectory(t *testing.T) {
 	// The session cwd follows `cd`, so by the time the session ends it may
 	// be in another repository or outside any; worktree_path alone must

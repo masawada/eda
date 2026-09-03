@@ -252,6 +252,30 @@ func TestRemoveWorktreeLocalUpstream(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRemoveWorktreeUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// `git switch --orphan` leaves the primary checkout on an unborn HEAD
+	// that resolves to no commit.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	// Without an upstream the unborn HEAD is the base, and resolving it
+	// fails only now, for this branch.
+	err := removeFrom(t, repo, repo, "topic", false)
+	if err == nil || !strings.Contains(err.Error(), "cannot resolve HEAD") {
+		t.Fatalf("branch judged by the unborn HEAD must fail on it, got %v", err)
+	}
+	assertKept(t, repo, wt, "topic")
+
+	// Judged by its upstream, the branch never needs that HEAD.
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "topic")
+	if err := removeFrom(t, repo, repo, "topic", false); err != nil {
+		t.Fatalf("branch reachable from its upstream must be removable: %v", err)
+	}
+	assertRemoved(t, repo, wt, "topic")
+}
+
 func TestRemoveWorktreeGoneUpstream(t *testing.T) {
 	repo := newTestClone(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
