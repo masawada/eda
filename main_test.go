@@ -300,6 +300,51 @@ func TestRunRemoveForceWithUnbornPrimaryHead(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRunRemoveForceNeedsNoInvokingWorktree(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+
+	// Inside .git the repository loads but there is no worktree to take a
+	// base from; only a forced removal, which takes none, can proceed.
+	gitDir := filepath.Join(repo, ".git")
+	if code, _, stderr := runEda(t, gitDir, "", "remove", "topic"); code == 0 || !strings.Contains(stderr, "work tree") {
+		t.Fatalf("remove without a worktree to judge from must fail: exit=%d stderr=%q", code, stderr)
+	}
+	assertKept(t, repo, wt, "topic")
+	if code, _, stderr := runEda(t, gitDir, "", "remove", "--force", "topic"); code != 0 {
+		t.Fatalf("remove --force: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "topic")
+}
+
+func TestRunRemoveMultipleWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wtA := mustResolve(t, ctx, repo, "a")
+	wtB := mustResolve(t, ctx, repo, "b")
+	wtC := mustResolve(t, ctx, repo, "c")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "a")
+	gitT(t, repo, "branch", "-q", "--set-upstream-to=main", "c")
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	// The unborn HEAD fails only b, which has no upstream to be judged by;
+	// a before it and c after it are removed through their upstreams.
+	code, _, stderr := runEda(t, repo, "", "remove", "a", "b", "c")
+	if code == 0 {
+		t.Fatal("a branch judged by the unborn HEAD must fail the command")
+	}
+	assertRemoved(t, repo, wtA, "a")
+	assertKept(t, repo, wtB, "b")
+	assertRemoved(t, repo, wtC, "c")
+	if !strings.Contains(stderr, "remove b:") || !strings.Contains(stderr, "cannot resolve HEAD") {
+		t.Errorf("stderr must report the unresolvable HEAD for b, got %q", stderr)
+	}
+	if !strings.Contains(stderr, "failed to remove 1 of 3") {
+		t.Errorf("stderr must summarize the failures, got %q", stderr)
+	}
+}
+
 func TestRunStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)
