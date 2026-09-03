@@ -11,6 +11,12 @@ git 2.36 or later.
 ## Install
 
 ```console
+$ brew install masawada/tap/eda
+```
+
+Or with `go install`:
+
+```console
 $ go install github.com/masawada/eda@latest
 ```
 
