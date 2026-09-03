@@ -284,6 +284,22 @@ func TestRunRemoveForce(t *testing.T) {
 	assertRemoved(t, repo, wt, "topic")
 }
 
+func TestRunRemoveForceWithUnbornPrimaryHead(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx, _ := loadRepoWithRoot(t, repo)
+	wt := mustResolve(t, ctx, repo, "topic")
+	// `git switch --orphan` leaves the primary checkout on an unborn HEAD
+	// that resolves to no commit. A forced removal judges nothing against
+	// a base, so it must not need one.
+	gitT(t, repo, "switch", "-q", "--orphan", "orphan")
+
+	code, _, stderr := runEda(t, repo, "", "remove", "--force", "topic")
+	if code != 0 {
+		t.Fatalf("remove --force: exit=%d stderr=%q", code, stderr)
+	}
+	assertRemoved(t, repo, wt, "topic")
+}
+
 func TestRunStatus(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx, _ := loadRepoWithRoot(t, repo)

@@ -168,9 +168,12 @@ func cmdRemove(stderr io.Writer, args []string, cwd string) error {
 	if err != nil {
 		return err
 	}
-	base, err := invocationBase(ctx, cwd)
-	if err != nil {
-		return err
+	// A forced removal judges nothing against a base, so it takes none.
+	var base removeBase
+	if !*force {
+		if base, err = invocationBase(ctx, cwd); err != nil {
+			return err
+		}
 	}
 	// A single branch keeps the plain one-line error; the per-branch prefix
 	// and the summary would only repeat it.
