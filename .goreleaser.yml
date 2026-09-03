@@ -1,0 +1,45 @@
+version: 2
+
+builds:
+  - main: .
+    binary: eda
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # No -X injection: the version lives in main.go and is maintained by
+    # tagpr, so a released binary reports the same value as `go install`.
+    ldflags:
+      - -s -w
+
+archives:
+  - formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: "checksums.txt"
+
+# tagpr owns the release notes. It writes them into the draft release from
+# the same pull request titles that go into CHANGELOG.md; goreleaser only
+# attaches the artifacts to that draft and publishes it.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: masawada
+    name: eda
+  use_existing_draft: true
+  mode: keep-existing
+  # A rerun after a partially uploaded release must not fail on assets that
+  # are already there.
+  replace_existing_artifacts: true

@@ -24,7 +24,14 @@ commands:
   init - <shell>                print the shell integration script (zsh, bash)
   hook worktree-create          Claude Code WorktreeCreate hook entrypoint (stdin JSON)
   hook worktree-remove          Claude Code WorktreeRemove hook entrypoint (stdin JSON)
+  version                       print the version of eda
 `
+
+// version is the current release version, maintained by tagpr. It is the
+// single source of truth: tagpr bumps it in the release pull request and
+// tags what it reads back, so plain `go build`, `go install` and the
+// released binaries all report the same value.
+var version = "0.0.0"
 
 func main() {
 	cwd, err := os.Getwd()
@@ -63,6 +70,8 @@ func run(stdin io.Reader, stdout, stderr io.Writer, args []string, cwd string) i
 		err = cmdInit(stdout, rest)
 	case "hook":
 		err = cmdHook(stdin, stdout, stderr, rest, cwd)
+	case "version":
+		err = cmdVersion(stdout, rest)
 	default:
 		_, _ = fmt.Fprintf(stderr, "eda: unknown command %q\n%s", cmd, usage)
 		return 2
@@ -236,6 +245,19 @@ func cmdStatus(stdout io.Writer, args []string, cwd string) error {
 	_, err = fmt.Fprintf(stdout, "primary  %s\nworktree %s\nbranch   %s\n",
 		ctx.PrimaryPath, strings.TrimSuffix(top, "\n"), strings.TrimSuffix(branch, "\n"))
 	return err
+}
+
+// cmdVersion reports the version. It deliberately does not load a repository:
+// asking a binary what it is must work from anywhere, including outside a
+// git checkout.
+func cmdVersion(stdout io.Writer, args []string) error {
+	if len(args) != 0 {
+		return fmt.Errorf("usage: eda version")
+	}
+	if _, err := fmt.Fprintf(stdout, "eda version %s\n", version); err != nil {
+		return fmt.Errorf("write version: %w", err)
+	}
+	return nil
 }
 
 // hookInput is the JSON Claude Code writes to worktree hooks. The cwd field
