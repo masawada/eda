@@ -396,6 +396,13 @@ func TestRemoveWorktreeRefusesDuplicateBranchOutsideRoot(t *testing.T) {
 	if !errors.As(err, &refusal) {
 		t.Fatalf("branch attached to two worktrees must be refused, got %v", err)
 	}
+	// The duplicate refusal names both worktrees; the unmanaged refusal
+	// names only one and must not take precedence.
+	for _, path := range []string{wt, dup} {
+		if !strings.Contains(err.Error(), path) {
+			t.Errorf("refusal must list the worktree %q, got %q", path, err)
+		}
+	}
 	assertKept(t, repo, wt, "topic")
 	assertKept(t, repo, dup, "topic")
 }
