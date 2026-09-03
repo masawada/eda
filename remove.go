@@ -78,7 +78,8 @@ func (b removeBase) headFor(path string) (oid, desc string) {
 // is set, it refuses to touch anything when the worktree is dirty or the
 // branch tip is not reachable from its base, the rule of `git branch -d`:
 // the base is the branch's upstream when that ref resolves, otherwise the
-// HEAD that base names.
+// HEAD that base names. A branch attached to more than one worktree (which
+// `git worktree add --force` allows) is refused: the pair is not unique.
 //
 // All conditions are checked before any deletion. A failure between the
 // worktree removal and the branch deletion leaves the branch behind without
@@ -91,16 +92,23 @@ func removeWorktree(ctx *repoContext, base removeBase, branch string, force bool
 	if len(ctx.Entries) > 0 && ctx.Entries[0].Branch == branch {
 		return refusalf("branch %q is checked out in the primary checkout; eda does not remove it", branch)
 	}
-	var entry *worktreeEntry
+	var matches []*worktreeEntry
 	for i, e := range ctx.Entries[1:] {
 		if !e.Bare && !e.Detached && e.Branch == branch {
-			entry = &ctx.Entries[i+1]
-			break
+			matches = append(matches, &ctx.Entries[i+1])
 		}
 	}
-	if entry == nil {
+	if len(matches) == 0 {
 		return refusalf("no worktree found for branch %q", branch)
 	}
+	if len(matches) > 1 {
+		paths := make([]string, len(matches))
+		for i, e := range matches {
+			paths[i] = e.Path
+		}
+		return refusalf("branch %q is attached to more than one worktree (%s); detach the extra ones with `git worktree remove`", branch, strings.Join(paths, ", "))
+	}
+	entry := matches[0]
 	if entry.Locked {
 		return refusalf("worktree %s is locked; unlock it with `git worktree unlock` first", entry.Path)
 	}
