@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.2](https://github.com/masawada/eda/compare/v0.0.1...v0.0.2) - 2026-09-05
+
+- Document installing with Homebrew by @masawada in https://github.com/masawada/eda/pull/27
+- Bump Songmu/tagpr from 1.20.1 to 1.20.3 by @dependabot[bot] in https://github.com/masawada/eda/pull/29
+
 ## [v0.0.1](https://github.com/masawada/eda/commits/v0.0.1) - 2026-09-03
 
 - Add GitHub Actions CI by @masawada in https://github.com/masawada/eda/pull/1
