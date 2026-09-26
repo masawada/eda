@@ -31,7 +31,7 @@ commands:
 // single source of truth: tagpr bumps it in the release pull request and
 // tags what it reads back, so plain `go build`, `go install` and the
 // released binaries all report the same value.
-var version = "0.0.1"
+var version = "0.0.2"
 
 func main() {
 	cwd, err := os.Getwd()
